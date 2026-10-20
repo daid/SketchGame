@@ -1,0 +1,11 @@
+[PHOTOSHOOT] {
+    stretch: true
+    [CAPTURE] {
+        type: button
+        alignment: bottomright
+
+        caption: CAPTURE
+        size: 150, 50
+        margin: 25
+    }
+}

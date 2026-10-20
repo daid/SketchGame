@@ -1,0 +1,22 @@
+{
+    color: #FFFFFF
+    font: gui/theme/ReenieBeanie-Regular.ttf
+    size: 30
+    [label] {
+    }
+    [button.background] {
+        color: #FFFFFF
+    }
+    [button.forground] {
+        color: #000000
+    }
+    [panel] {
+    }
+    [progressbar] {
+    }
+    [progressbar.background] {
+    }
+    [image] {
+    }
+}
+
