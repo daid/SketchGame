@@ -2,7 +2,6 @@
 #include <sp2/window.h>
 #include <sp2/random.h>
 #include <sp2/logging.h>
-#include <sp2/io/resourceProvider.h>
 #include <sp2/graphics/gui/scene.h>
 #include <sp2/graphics/gui/theme.h>
 #include <sp2/graphics/gui/loader.h>
@@ -11,25 +10,15 @@
 #include <sp2/graphics/scene/collisionrenderpass.h>
 #include <sp2/graphics/textureManager.h>
 #include <sp2/graphics/meshdata.h>
-#include <sp2/graphics/image/draw.h>
-#include <sp2/graphics/image/blur.h>
-#include <sp2/graphics/image/convert.h>
-#include <sp2/graphics/image/threshold.h>
-#include <sp2/graphics/image/resize.h>
+#include <sp2/graphics/meshbuilder.h>
 #include <sp2/collision/2d/box.h>
 #include <sp2/collision/2d/chains.h>
 #include <sp2/scene/scene.h>
 #include <sp2/scene/node.h>
 #include <sp2/scene/camera.h>
-#include <sp2/io/keybinding.h>
 #include <sp2/io/cameraCapture.h>
 #include <sp2/io/http/request.h>
-#include <sp2/tween.h>
 #include <sp2/stringutil/base64.h>
-#include <array>
-#include <optional>
-#include <numeric>
-#include <bitset>
 
 #include "photoProcess.h"
 
@@ -115,6 +104,26 @@ public:
     }
 };
 
+class QuadTree
+{
+public:
+    int8_t sample(int x, int y) {
+        if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return -127;
+
+        uint32_t idx = 0;
+        unsigned int depth = MAX_DEPTH;
+        auto value = data[idx];
+        
+        return -127;
+    }
+
+private:
+    unsigned int MAX_DEPTH = 10;
+    int SIZE = 1 << MAX_DEPTH;
+    static constexpr uint32_t TAG_BRANCH = 0x80000000;
+    std::vector<uint32_t> data{0};
+};
+
 class MarchingSquaresNode : public sp::Node
 {
 public:
@@ -143,6 +152,7 @@ public:
 
     void updateMesh()
     {
+        const float MESH_SCALE = 0.5f;
         auto m = [](int8_t a, int8_t b) -> float {
             auto d = a - b;
             sp2assert(a > 0, "?");
@@ -166,41 +176,57 @@ public:
                 if (d > 0) flags |= 0x08;
                 switch(flags) {
                 case 0: break;
-                case 1: shape.addLine({x+0.0f,y+m(a,c)},{x+m(a,b),y+0.0f}); break;
-                case 2: shape.addLine({x+1.0f-m(b,a),y+0.0f},{x+1.0f,y+m(b,d)}); break;
-                case 3: shape.addLine({x+0.0f,y+m(a,c)},{x+1.0f,y+m(b,d)}); break;
-                case 4: shape.addLine({x+m(c,d),y+1.0f},{x+0.0f,y+1.0f-m(c,a)}); break;
-                case 5: shape.addLine({x+m(c,d),y+1.0f},{x+m(a,b),y+0.0f}); break;
+                case 1: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)}*MESH_SCALE,sp::Vector2f{x+m(a,b),y+0.0f}*MESH_SCALE); break;
+                case 2: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f}*MESH_SCALE,sp::Vector2f{x+1.0f,y+m(b,d)}*MESH_SCALE); break;
+                case 3: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)}*MESH_SCALE,sp::Vector2f{x+1.0f,y+m(b,d)}*MESH_SCALE); break;
+                case 4: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f}*MESH_SCALE,sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}*MESH_SCALE); break;
+                case 5: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f}*MESH_SCALE,sp::Vector2f{x+m(a,b),y+0.0f}*MESH_SCALE); break;
                 case 6:
                     if (b*c >= a*d) {
-                        shape.addLine({x+1.0f-m(b,a),y+0.0f},{x+0.0f,y+1.0f-m(c,a)});
-                        shape.addLine({x+m(c,d),y+1.0f},{x+1.0f,y+m(b,d)});
+                        shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f}*MESH_SCALE,sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}*MESH_SCALE);
+                        shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f}*MESH_SCALE,sp::Vector2f{x+1.0f,y+m(b,d)}*MESH_SCALE);
                     } else {
-                        shape.addLine({x+1.0f-m(b,a),y+0.0f},{x+1.0f,y+m(b,d)});
-                        shape.addLine({x+m(c,d),y+1.0f},{x+0.0f,y+1.0f-m(c,a)});
+                        shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f}*MESH_SCALE,sp::Vector2f{x+1.0f,y+m(b,d)}*MESH_SCALE);
+                        shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f}*MESH_SCALE,sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}*MESH_SCALE);
                     }
                     break;
-                case 7: shape.addLine({x+m(c,d),y+1.0f},{x+1.0f,y+m(b,d)}); break;
-                case 8: shape.addLine({x+1.0f,y+1.0f-m(d,b)},{x+1.0f-m(d,c),y+1.0f}); break;
+                case 7: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f}*MESH_SCALE,sp::Vector2f{x+1.0f,y+m(b,d)}*MESH_SCALE); break;
+                case 8: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)}*MESH_SCALE,sp::Vector2f{x+1.0f-m(d,c),y+1.0f}*MESH_SCALE); break;
                 case 9:
                     if (a*d >= b*c) {
-                        shape.addLine({x+0.0f,y+m(a,c)},{x+1.0f-m(d,c),y+1.0f});
-                        shape.addLine({x+1.0f,y+1.0f-m(d,b)},{x+m(a,b),y+0.0f});
+                        shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)}*MESH_SCALE,sp::Vector2f{x+1.0f-m(d,c),y+1.0f}*MESH_SCALE);
+                        shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)}*MESH_SCALE,sp::Vector2f{x+m(a,b),y+0.0f}*MESH_SCALE);
                     } else {
-                        shape.addLine({x+0.0f,y+m(a,c)},{x+m(a,b),y+0.0f});
-                        shape.addLine({x+1.0f,y+1.0f-m(d,b)},{x+1.0f-m(d,c),y+1.0f});
+                        shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)}*MESH_SCALE,sp::Vector2f{x+m(a,b),y+0.0f}*MESH_SCALE);
+                        shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)}*MESH_SCALE,sp::Vector2f{x+1.0f-m(d,c),y+1.0f}*MESH_SCALE);
                     }
                     break;
-                case 10: shape.addLine({x+1.0f-m(b,a),y+0.0f},{x+1.0f-m(d,c),y+1.0f}); break;
-                case 11: shape.addLine({x+0.0f,y+m(a,c)},{x+1.0f-m(d,c),y+1.0f}); break;
-                case 12: shape.addLine({x+1.0f,y+1.0f-m(d,b)},{x+0.0f,y+1.0f-m(c,a)}); break;
-                case 13: shape.addLine({x+1.0f,y+1.0f-m(d,b)},{x+m(a,b),y+0.0f}); break;
-                case 14: shape.addLine({x+1.0f-m(b,a),y+0.0f},{x+0.0f,y+1.0f-m(c,a)}); break;
+                case 10: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f}*MESH_SCALE,sp::Vector2f{x+1.0f-m(d,c),y+1.0f}*MESH_SCALE); break;
+                case 11: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)}*MESH_SCALE,sp::Vector2f{x+1.0f-m(d,c),y+1.0f}*MESH_SCALE); break;
+                case 12: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)}*MESH_SCALE,sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}*MESH_SCALE); break;
+                case 13: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)}*MESH_SCALE,sp::Vector2f{x+m(a,b),y+0.0f}*MESH_SCALE); break;
+                case 14: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f}*MESH_SCALE,sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}*MESH_SCALE); break;
                 case 15: break;
                 default: LOG(Debug, "??", flags);
                 }
             }
         }
+
+        sp::MeshBuilder mb;
+        for(const auto& loop : shape.loops) {
+            auto p0 = loop.back();
+            for(auto p1 : loop) {
+                auto v = p1 - p0;
+                auto n = sp::Vector2f{v.y,-v.x}.normalized() * 0.05f;
+                mb.addQuad(p0 + n, p1 + n, p0 - n, p1 - n);
+                p0 = p1;
+            }
+        }
+
+        render_data.type = sp::RenderData::Type::Normal;
+        render_data.shader = sp::Shader::get("internal:color.shader");
+        render_data.mesh = mb.create();
+
         setCollisionShape(shape);
     }
 
@@ -231,7 +257,7 @@ public:
         //     n->setRotation(sp::random(0, 360));
         // }
         msn = new MarchingSquaresNode(getRoot());
-        msn->setPosition({-8,-8});
+        msn->setPosition({-4,-4});
         cursor = new sp::Node(getRoot());
         cursor->render_data.type = sp::RenderData::Type::Normal;
         cursor->render_data.shader = sp::Shader::get("internal:color.shader");
@@ -252,8 +278,8 @@ public:
     {
         auto p = sp::Vector2d(ray.start.x, ray.start.y);
         p -= msn->getPosition2D();
-        auto pi = sp::Vector2i(std::round(p.x), std::round(p.y));
-        cursor->setPosition(msn->getPosition2D() + sp::Vector2d(pi));
+        auto pi = sp::Vector2i(std::round(p.x*2), std::round(p.y*2));
+        cursor->setPosition(msn->getPosition2D() + sp::Vector2d(pi)*0.5);
         return false;
     }
 
@@ -266,8 +292,8 @@ public:
     void onPointerDrag(sp::Ray3d ray, int id) override {
         auto p = sp::Vector2d(ray.start.x, ray.start.y);
         p -= msn->getPosition2D();
-        auto pi = sp::Vector2i(std::round(p.x), std::round(p.y));
-        cursor->setPosition(msn->getPosition2D() + sp::Vector2d(pi));
+        auto pi = sp::Vector2i(std::round(p.x*2), std::round(p.y*2));
+        cursor->setPosition(msn->getPosition2D() + sp::Vector2d(pi)*0.5);
         if (pi.x >= 0 && pi.y >= 0 && pi.x < msn->WIDTH && pi.y < msn->HEIGHT) {
             msn->data[pi.x+pi.y*msn->WIDTH] -= 1;
             msn->updateMesh();
