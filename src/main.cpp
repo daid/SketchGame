@@ -120,36 +120,39 @@ class MarchingSquaresNode : public sp::Node
 public:
     MarchingSquaresNode(sp::P<sp::Node> parent) : sp::Node(parent)
     {
-        data.fill(0);
+        data.fill(-128);
 
         for(int y=0;y<WIDTH;y++) {
             for(int x=0;x<WIDTH;x++) {
-                data[x+y*WIDTH] = sp::irandom(0, 255);
+                data[x+y*WIDTH] = sp::irandom(-128, 127);
             }
         }
         for(int x=0;x<WIDTH;x++) {
-            data[x] = 255;
-            data[x+(HEIGHT-1)*WIDTH] = 255;
+            data[x] = 127;
+            data[x+(HEIGHT-1)*WIDTH] = 127;
         }
         for(int y=0;y<HEIGHT;y++) {
-            data[0+y*WIDTH] = 255;
-            data[(WIDTH-1)+y*WIDTH] = 255;
+            data[0+y*WIDTH] = 127;
+            data[(WIDTH-1)+y*WIDTH] = 127;
         }
 
-        for(int n=0; n<5; n++)
-            data[(3+n*2)+(HEIGHT/2)*WIDTH] = 255 - n * 10;
+        // for(int n=0; n<5; n++)
+        //     data[(3+n)+(HEIGHT/2+n)*WIDTH] = 127 - n * 10;
         updateMesh();
     }
 
     void updateMesh()
     {
-        auto m = [](uint8_t a, uint8_t b) -> float {
+        auto m = [](int8_t a, int8_t b) -> float {
             auto d = a - b;
-            sp2assert(a > 127, "?");
+            sp2assert(a > 0, "?");
             sp2assert(d > 0, "?");
-            return float(a - 127) / float(d+1);
+            auto res = float(a) / float(d+1);
+            sp2assert(res > 0.0f, "?");
+            sp2assert(res < 1.0f, "?");
+            return res;
         };
-        std::vector<std::pair<sp::Vector2f, sp::Vector2f>> lines;
+        sp::collision::Chains2D shape;
         for(int y=0;y<WIDTH-1;y++) {
             for(int x=0;x<WIDTH-1;x++) {
                 int flags = 0;
@@ -157,47 +160,124 @@ public:
                 auto b = data[(x+1)+(y+0)*WIDTH];
                 auto c = data[(x+0)+(y+1)*WIDTH];
                 auto d = data[(x+1)+(y+1)*WIDTH];
-                if (a > 127) flags |= 0x01;
-                if (b > 127) flags |= 0x02;
-                if (c > 127) flags |= 0x04;
-                if (d > 127) flags |= 0x08;
+                if (a > 0) flags |= 0x01;
+                if (b > 0) flags |= 0x02;
+                if (c > 0) flags |= 0x04;
+                if (d > 0) flags |= 0x08;
                 switch(flags) {
                 case 0: break;
-                case 1: lines.push_back({{x+0.0f,y+m(a,c)},{x+m(a,b),y+0.0f}}); break;
-                case 2: lines.push_back({{x+1.0f-m(b,a),y+0.0f},{x+1.0f,y+m(b,d)}}); break;
-                case 3: lines.push_back({{x+0.0f,y+m(a,c)},{x+1.0f,y+m(b,d)}}); break;
-                case 4: lines.push_back({{x+m(c,d),y+1.0f},{x+0.0f,y+1.0f-m(c,a)}}); break;
-                case 5: lines.push_back({{x+m(c,d),y+1.0f},{x+m(a,b),y+0.0f}}); break;
+                case 1: shape.addLine({x+0.0f,y+m(a,c)},{x+m(a,b),y+0.0f}); break;
+                case 2: shape.addLine({x+1.0f-m(b,a),y+0.0f},{x+1.0f,y+m(b,d)}); break;
+                case 3: shape.addLine({x+0.0f,y+m(a,c)},{x+1.0f,y+m(b,d)}); break;
+                case 4: shape.addLine({x+m(c,d),y+1.0f},{x+0.0f,y+1.0f-m(c,a)}); break;
+                case 5: shape.addLine({x+m(c,d),y+1.0f},{x+m(a,b),y+0.0f}); break;
                 case 6:
-                    lines.push_back({{x+1.0f-m(b,a),y+0.0f},{x+0.0f,y+1.0f-m(c,a)}});
-                    lines.push_back({{x+m(c,d),y+1.0f},{x+1.0f,y+m(b,d)}});
+                    if (b*c >= a*d) {
+                        shape.addLine({x+1.0f-m(b,a),y+0.0f},{x+0.0f,y+1.0f-m(c,a)});
+                        shape.addLine({x+m(c,d),y+1.0f},{x+1.0f,y+m(b,d)});
+                    } else {
+                        shape.addLine({x+1.0f-m(b,a),y+0.0f},{x+1.0f,y+m(b,d)});
+                        shape.addLine({x+m(c,d),y+1.0f},{x+0.0f,y+1.0f-m(c,a)});
+                    }
                     break;
-                case 7: lines.push_back({{x+m(c,d),y+1.0f},{x+1.0f,y+m(b,d)}}); break;
-                case 8: lines.push_back({{x+1.0f,y+1.0f-m(d,b)},{x+1.0f-m(d,c),y+1.0f}}); break;
+                case 7: shape.addLine({x+m(c,d),y+1.0f},{x+1.0f,y+m(b,d)}); break;
+                case 8: shape.addLine({x+1.0f,y+1.0f-m(d,b)},{x+1.0f-m(d,c),y+1.0f}); break;
                 case 9:
-                    lines.push_back({{x+0.0f,y+m(a,c)},{x+1.0f-m(d,c),y+1.0f}});
-                    lines.push_back({{x+1.0f,y+1.0f-m(d,b)},{x+m(a,b),y+0.0f}});
+                    if (a*d >= b*c) {
+                        shape.addLine({x+0.0f,y+m(a,c)},{x+1.0f-m(d,c),y+1.0f});
+                        shape.addLine({x+1.0f,y+1.0f-m(d,b)},{x+m(a,b),y+0.0f});
+                    } else {
+                        shape.addLine({x+0.0f,y+m(a,c)},{x+m(a,b),y+0.0f});
+                        shape.addLine({x+1.0f,y+1.0f-m(d,b)},{x+1.0f-m(d,c),y+1.0f});
+                    }
                     break;
-                case 10: lines.push_back({{x+1.0f-m(b,a),y+0.0f},{x+1.0f-m(d,c),y+1.0f}}); break;
-                case 11: lines.push_back({{x+0.0f,y+m(a,c)},{x+1.0f-m(d,c),y+1.0f}}); break;
-                case 12: lines.push_back({{x+1.0f,y+1.0f-m(d,b)},{x+0.0f,y+1.0f-m(c,a)}}); break;
-                case 13: lines.push_back({{x+1.0f,y+1.0f-m(d,b)},{x+m(a,b),y+0.0f}}); break;
-                case 14: lines.push_back({{x+1.0f-m(b,a),y+0.0f},{x+0.0f,y+1.0f-m(c,a)}}); break;
+                case 10: shape.addLine({x+1.0f-m(b,a),y+0.0f},{x+1.0f-m(d,c),y+1.0f}); break;
+                case 11: shape.addLine({x+0.0f,y+m(a,c)},{x+1.0f-m(d,c),y+1.0f}); break;
+                case 12: shape.addLine({x+1.0f,y+1.0f-m(d,b)},{x+0.0f,y+1.0f-m(c,a)}); break;
+                case 13: shape.addLine({x+1.0f,y+1.0f-m(d,b)},{x+m(a,b),y+0.0f}); break;
+                case 14: shape.addLine({x+1.0f-m(b,a),y+0.0f},{x+0.0f,y+1.0f-m(c,a)}); break;
                 case 15: break;
                 default: LOG(Debug, "??", flags);
                 }
             }
         }
-
-        sp::collision::Chains2D shape;
-        for(auto& line : lines)
-            shape.chains.push_back({line.first, line.second});
         setCollisionShape(shape);
     }
 
     static constexpr int WIDTH = 16;
     static constexpr int HEIGHT = 16;
-    std::array<uint8_t, WIDTH*HEIGHT> data;
+    std::array<int8_t, WIDTH*HEIGHT> data;
+};
+
+class Scene : public sp::Scene
+{
+public:
+    Scene() : sp::Scene("MAIN")
+    {
+        auto camera = new sp::Camera(getRoot());
+        camera->setOrtographic({5.0,5.0});
+        setDefaultCamera(camera);
+
+        // auto pdt = new PhotoDrawingTexture("20261017143044.png");
+        // for(int cnt=0; cnt<10;cnt++) {
+        //     auto n = new sp::Node(scene->getRoot());
+        //     n->render_data.type = sp::RenderData::Type::Subtractive;
+        //     n->render_data.texture = pdt;
+        //     n->render_data.shader = sp::Shader::get("internal:basic.shader");
+        //     n->render_data.mesh = pdt->mesh;
+        //     sp::collision::Box2D shape{0.5, 0.5};
+        //     n->setCollisionShape(shape);
+        //     n->setPosition({sp::random(-.1,.1),sp::random(-.1,.1)});
+        //     n->setRotation(sp::random(0, 360));
+        // }
+        msn = new MarchingSquaresNode(getRoot());
+        msn->setPosition({-8,-8});
+        cursor = new sp::Node(getRoot());
+        cursor->render_data.type = sp::RenderData::Type::Normal;
+        cursor->render_data.shader = sp::Shader::get("internal:color.shader");
+        cursor->render_data.mesh = sp::MeshData::createQuad({0.2f,0.2f});
+        for(int n=0; n<10; n++) {
+            auto test = new sp::Node(getRoot());
+            test->render_data.type = sp::RenderData::Type::Normal;
+            test->render_data.shader = sp::Shader::get("internal:color.shader");
+            test->render_data.mesh = sp::MeshData::createQuad({0.2f,0.2f});
+            sp::collision::Box2D shape{0.2f,0.2f};
+            shape.restitution = 1.0;
+            test->setCollisionShape(shape);
+            test->setLinearVelocity({1,1});
+        }
+    }
+
+    bool onPointerMove(sp::Ray3d ray, int id) override
+    {
+        auto p = sp::Vector2d(ray.start.x, ray.start.y);
+        p -= msn->getPosition2D();
+        auto pi = sp::Vector2i(std::round(p.x), std::round(p.y));
+        cursor->setPosition(msn->getPosition2D() + sp::Vector2d(pi));
+        return false;
+    }
+
+    bool onPointerDown(sp::io::Pointer::Button button, sp::Ray3d ray, int id) override
+    {
+        onPointerDrag(ray, id);
+        return true;
+    }
+
+    void onPointerDrag(sp::Ray3d ray, int id) override {
+        auto p = sp::Vector2d(ray.start.x, ray.start.y);
+        p -= msn->getPosition2D();
+        auto pi = sp::Vector2i(std::round(p.x), std::round(p.y));
+        cursor->setPosition(msn->getPosition2D() + sp::Vector2d(pi));
+        if (pi.x >= 0 && pi.y >= 0 && pi.x < msn->WIDTH && pi.y < msn->HEIGHT) {
+            msn->data[pi.x+pi.y*msn->WIDTH] -= 1;
+            msn->updateMesh();
+        }
+    }
+
+    void onPointerUp(sp::Ray3d ray, int id) override {}
+
+    sp::P<MarchingSquaresNode> msn;
+    sp::P<sp::Node> cursor;
 };
 
 int main(int argc, char** argv)
@@ -229,24 +309,7 @@ int main(int argc, char** argv)
     window->addLayer(scene_layer);
 
     //TODO: Create your own scene(s) here and populate them with nodes.
-    auto scene = new sp::Scene("TEST");
-    auto camera = new sp::Camera(scene->getRoot());
-    camera->setOrtographic({5.0,5.0});
-    scene->setDefaultCamera(camera);
-
-    // auto pdt = new PhotoDrawingTexture("20261017143044.png");
-    // for(int cnt=0; cnt<10;cnt++) {
-    //     auto n = new sp::Node(scene->getRoot());
-    //     n->render_data.type = sp::RenderData::Type::Subtractive;
-    //     n->render_data.texture = pdt;
-    //     n->render_data.shader = sp::Shader::get("internal:basic.shader");
-    //     n->render_data.mesh = pdt->mesh;
-    //     sp::collision::Box2D shape{0.5, 0.5};
-    //     n->setCollisionShape(shape);
-    //     n->setPosition({sp::random(-.1,.1),sp::random(-.1,.1)});
-    //     n->setRotation(sp::random(0, 360));
-    // }
-    (new MarchingSquaresNode(scene->getRoot()))->setPosition({-8,-8});
+    auto scene = new Scene();
 
     // auto n = new sp::Node(scene->getRoot());
     // n->render_data.type = sp::RenderData::Type::Normal;
