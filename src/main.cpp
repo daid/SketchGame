@@ -107,21 +107,77 @@ public:
 class QuadTree
 {
 public:
-    int8_t sample(int x, int y) {
-        if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return -127;
+    uint32_t sample(int x, int y) {
+        if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return DEFAULT_VALUE;
 
-        uint32_t idx = 0;
-        unsigned int depth = MAX_DEPTH;
-        auto value = data[idx];
-        
-        return -127;
+        unsigned int depth = MAX_DEPTH - 1;
+        auto node = &data[0];
+        while(true) {
+            auto idx = 0;
+            if (x >= (1 << depth)) { idx |= 1; x -= 1 << depth; }
+            if (y >= (1 << depth)) { idx |= 2; y -= 1 << depth; }
+            auto value = (*node)[idx];
+            if (!(value & TAG_BRANCH)) return value;
+            depth -= 1;
+            node = &data[value&~TAG_BRANCH];
+        }
+    }
+
+    void set(int x, int y, uint32_t new_value)
+    {
+        if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return;
+        setImpl(0, x, y, MAX_DEPTH - 1, new_value);
     }
 
 private:
-    unsigned int MAX_DEPTH = 10;
+    bool setImpl(uint32_t node_idx, int x, int y, int depth, uint32_t new_value)
+    {
+        int idx = 0;
+        if (x & (1 << depth)) idx |= 1;
+        if (y & (1 << depth)) idx |= 2;
+        if (depth == 0) {
+            data[node_idx][idx] = new_value;
+        } else {
+            auto value = data[node_idx][idx];
+            if (value & TAG_BRANCH) {
+                if (setImpl(value&~TAG_BRANCH, x, y, depth-1, new_value)) {
+                    freeNode(value&~TAG_BRANCH);
+                    data[node_idx][idx] = new_value;
+                }
+            } else if (value != new_value) {
+                auto new_node_idx = allocNode(value);
+                data[node_idx][idx] = new_node_idx | TAG_BRANCH;
+                setImpl(new_node_idx, x, y, depth - 1, new_value);
+            }
+        }
+        return data[node_idx][0] == data[node_idx][1] && data[node_idx][0] == data[node_idx][2] && data[node_idx][0] == data[node_idx][3];
+    }
+
+    uint32_t allocNode(uint32_t value)
+    {
+        if (freeList != TAG_BRANCH) {
+            auto res = freeList;
+            freeList = data[res][0];
+            return res;
+        }
+        auto res = data.size();
+        data.push_back({value,value,value,value});
+        return res;
+    }
+
+    void freeNode(uint32_t index)
+    {
+        data[index][0] = freeList;
+        freeList = index;
+    }
+
+    unsigned int MAX_DEPTH = 2;
     int SIZE = 1 << MAX_DEPTH;
     static constexpr uint32_t TAG_BRANCH = 0x80000000;
-    std::vector<uint32_t> data{0};
+    static constexpr uint32_t DEFAULT_VALUE = 0x7FFFFFFF;
+    using Node = std::array<uint32_t, 4>;
+    std::vector<Node> data {{DEFAULT_VALUE,DEFAULT_VALUE,DEFAULT_VALUE,DEFAULT_VALUE}};
+    uint32_t freeList = TAG_BRANCH;
 };
 
 class MarchingSquaresNode : public sp::Node
@@ -213,6 +269,16 @@ public:
         }
 
         sp::MeshBuilder mb;
+        for(const auto& chain : shape.chains) {
+            auto p0 = chain.front();
+            for(auto it = chain.begin()+1; it!=chain.end(); it++) {
+                auto p1 = *it;
+                auto v = p1 - p0;
+                auto n = sp::Vector2f{v.y,-v.x}.normalized() * 0.05f;
+                mb.addQuad(p0 + n, p1 + n, p0 - n, p1 - n);
+                p0 = p1;
+            }
+        }
         for(const auto& loop : shape.loops) {
             auto p0 = loop.back();
             for(auto p1 : loop) {
@@ -268,7 +334,7 @@ public:
             test->render_data.shader = sp::Shader::get("internal:color.shader");
             test->render_data.mesh = sp::MeshData::createQuad({0.2f,0.2f});
             sp::collision::Box2D shape{0.2f,0.2f};
-            shape.restitution = 1.0;
+            shape.restitution = 1.1;
             test->setCollisionShape(shape);
             test->setLinearVelocity({1,1});
         }
@@ -308,6 +374,10 @@ public:
 
 int main(int argc, char** argv)
 {
+    QuadTree qt;
+    for(int y=0; y<4; y++) for(int x=0; x<4; x++) qt.set(x, y, 0);
+    LOG(Debug, qt.sample(0, 0), qt.sample(1, 0), qt.sample(0, 1), qt.sample(1, 1));
+
     sp::P<sp::Engine> engine = new sp::Engine();
 
     //Create resource providers, so we can load things.
