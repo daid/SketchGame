@@ -107,15 +107,15 @@ public:
 class QuadTree
 {
 public:
-    uint32_t sample(int x, int y) {
+    uint32_t get(int x, int y) {
         if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return DEFAULT_VALUE;
 
         unsigned int depth = MAX_DEPTH - 1;
         auto node = &data[0];
         while(true) {
             auto idx = 0;
-            if (x >= (1 << depth)) { idx |= 1; x -= 1 << depth; }
-            if (y >= (1 << depth)) { idx |= 2; y -= 1 << depth; }
+            if (x & (1 << depth)) { idx |= 1; }
+            if (y & (1 << depth)) { idx |= 2; }
             auto value = (*node)[idx];
             if (!(value & TAG_BRANCH)) return value;
             depth -= 1;
@@ -129,6 +129,8 @@ public:
         setImpl(0, x, y, MAX_DEPTH - 1, new_value);
     }
 
+    static constexpr unsigned int MAX_DEPTH = 10;
+    static constexpr int SIZE = 1 << MAX_DEPTH;
 private:
     bool setImpl(uint32_t node_idx, int x, int y, int depth, uint32_t new_value)
     {
@@ -171,8 +173,6 @@ private:
         freeList = index;
     }
 
-    unsigned int MAX_DEPTH = 2;
-    int SIZE = 1 << MAX_DEPTH;
     static constexpr uint32_t TAG_BRANCH = 0x80000000;
     static constexpr uint32_t DEFAULT_VALUE = 0x7FFFFFFF;
     using Node = std::array<uint32_t, 4>;
@@ -185,20 +185,18 @@ class MarchingSquaresNode : public sp::Node
 public:
     MarchingSquaresNode(sp::P<sp::Node> parent) : sp::Node(parent)
     {
-        data.fill(-128);
-
-        for(int y=0;y<WIDTH;y++) {
-            for(int x=0;x<WIDTH;x++) {
-                data[x+y*WIDTH] = sp::irandom(-128, 127);
+        for(int y=0;y<tree.SIZE;y++) {
+            for(int x=0;x<tree.SIZE;x++) {
+                tree.set(x,y, sp::irandom(-128, 127));
             }
         }
-        for(int x=0;x<WIDTH;x++) {
-            data[x] = 127;
-            data[x+(HEIGHT-1)*WIDTH] = 127;
+        for(int x=0;x<tree.SIZE;x++) {
+            tree.set(x, 0, 127);
+            tree.set(x, tree.SIZE-1, 127);
         }
-        for(int y=0;y<HEIGHT;y++) {
-            data[0+y*WIDTH] = 127;
-            data[(WIDTH-1)+y*WIDTH] = 127;
+        for(int y=0;y<tree.SIZE;y++) {
+            tree.set(0, y, 127);
+            tree.set(tree.SIZE-1, y, 127);
         }
 
         // for(int n=0; n<5; n++)
@@ -219,13 +217,13 @@ public:
             return res;
         };
         sp::collision::Chains2D shape;
-        for(int y=0;y<WIDTH-1;y++) {
-            for(int x=0;x<WIDTH-1;x++) {
+        for(int y=0;y<tree.SIZE-1;y++) {
+            for(int x=0;x<tree.SIZE-1;x++) {
                 int flags = 0;
-                auto a = data[(x+0)+(y+0)*WIDTH];
-                auto b = data[(x+1)+(y+0)*WIDTH];
-                auto c = data[(x+0)+(y+1)*WIDTH];
-                auto d = data[(x+1)+(y+1)*WIDTH];
+                auto a = tree.get(x+0, y+0);
+                auto b = tree.get(x+1, y+0);
+                auto c = tree.get(x+0, y+1);
+                auto d = tree.get(x+1, y+1);
                 if (a > 0) flags |= 0x01;
                 if (b > 0) flags |= 0x02;
                 if (c > 0) flags |= 0x04;
@@ -267,6 +265,7 @@ public:
                 }
             }
         }
+        LOG(Debug, shape.loops.size(), shape.chains.size());
 
         sp::MeshBuilder mb;
         for(const auto& chain : shape.chains) {
@@ -296,9 +295,7 @@ public:
         setCollisionShape(shape);
     }
 
-    static constexpr int WIDTH = 16;
-    static constexpr int HEIGHT = 16;
-    std::array<int8_t, WIDTH*HEIGHT> data;
+    QuadTree tree;
 };
 
 class Scene : public sp::Scene
@@ -323,7 +320,6 @@ public:
         //     n->setRotation(sp::random(0, 360));
         // }
         msn = new MarchingSquaresNode(getRoot());
-        msn->setPosition({-4,-4});
         cursor = new sp::Node(getRoot());
         cursor->render_data.type = sp::RenderData::Type::Normal;
         cursor->render_data.shader = sp::Shader::get("internal:color.shader");
@@ -360,8 +356,8 @@ public:
         p -= msn->getPosition2D();
         auto pi = sp::Vector2i(std::round(p.x*2), std::round(p.y*2));
         cursor->setPosition(msn->getPosition2D() + sp::Vector2d(pi)*0.5);
-        if (pi.x >= 0 && pi.y >= 0 && pi.x < msn->WIDTH && pi.y < msn->HEIGHT) {
-            msn->data[pi.x+pi.y*msn->WIDTH] -= 1;
+        if (pi.x >= 0 && pi.y >= 0 && pi.x < msn->tree.SIZE && pi.y < msn->tree.SIZE) {
+            msn->tree.set(pi.x, pi.y, msn->tree.get(pi.x, pi.y) - 1);
             msn->updateMesh();
         }
     }
@@ -374,10 +370,6 @@ public:
 
 int main(int argc, char** argv)
 {
-    QuadTree qt;
-    for(int y=0; y<4; y++) for(int x=0; x<4; x++) qt.set(x, y, 0);
-    LOG(Debug, qt.sample(0, 0), qt.sample(1, 0), qt.sample(0, 1), qt.sample(1, 1));
-
     sp::P<sp::Engine> engine = new sp::Engine();
 
     //Create resource providers, so we can load things.
