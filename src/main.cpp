@@ -18,10 +18,23 @@
 #include <sp2/scene/camera.h>
 #include <sp2/io/cameraCapture.h>
 #include <sp2/io/http/request.h>
+#include <sp2/io/keybinding.h>
 #include <sp2/stringutil/base64.h>
 
 #include "photoProcess.h"
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#endif//__GNUC__
+#include "FastNoiseLite.h"
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif//__GNUC__
 
+
+sp::io::Keybinding key_move_x{"MOVE_X", {"-left", "right"}};
+sp::io::Keybinding key_move_y{"MOVE_Y", {"-down", "up"}};
+sp::io::Keybinding key_dig{"DIG", {"space"}};
 
 sp::P<sp::Window> window;
 
@@ -125,11 +138,38 @@ public:
 
     void set(int x, int y, uint32_t new_value)
     {
+        sp2assert(!(new_value & TAG_BRANCH), "TAG_BRANCH set on value set in quadtree...");
         if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return;
         setImpl(0, x, y, MAX_DEPTH - 1, new_value);
     }
 
-    static constexpr unsigned int MAX_DEPTH = 10;
+    std::shared_ptr<sp::MeshData> createDebugMesh()
+    {
+        sp::MeshBuilder mb;
+        std::function<void(float,float,float,unsigned)> f = [this, &mb, &f](float x, float y, float size, unsigned idx) {
+            auto& node = data[idx];
+            for(int n=0; n<4; n++) {
+                auto nx = x;
+                auto ny = y;
+                if (n & 1) nx += size;
+                if (n & 2) ny += size;
+                if (node[n] & TAG_BRANCH) {
+                    f(nx, ny, size / 2, node[n] & ~TAG_BRANCH);
+                } else {
+                    mb.addQuad(
+                        {nx+size*0.1f, ny+size*0.1f},
+                        {nx+size*0.9f, ny+size*0.1f},
+                        {nx+size*0.1f, ny+size*0.9f},
+                        {nx+size*0.9f, ny+size*0.9f}
+                    );
+                }
+            }
+        };
+        f(0, 0, SIZE / 4, 0);
+        return mb.create();
+    }
+
+    static constexpr unsigned int MAX_DEPTH = 6;
     static constexpr int SIZE = 1 << MAX_DEPTH;
 private:
     bool setImpl(uint32_t node_idx, int x, int y, int depth, uint32_t new_value)
@@ -160,6 +200,7 @@ private:
         if (freeList != TAG_BRANCH) {
             auto res = freeList;
             freeList = data[res][0];
+            data[res] = {value,value,value,value}; 
             return res;
         }
         auto res = data.size();
@@ -174,7 +215,7 @@ private:
     }
 
     static constexpr uint32_t TAG_BRANCH = 0x80000000;
-    static constexpr uint32_t DEFAULT_VALUE = 0x7FFFFFFF;
+    static constexpr uint32_t DEFAULT_VALUE = 0x00000080;
     using Node = std::array<uint32_t, 4>;
     std::vector<Node> data {{DEFAULT_VALUE,DEFAULT_VALUE,DEFAULT_VALUE,DEFAULT_VALUE}};
     uint32_t freeList = TAG_BRANCH;
@@ -185,11 +226,19 @@ class MarchingSquaresNode : public sp::Node
 public:
     MarchingSquaresNode(sp::P<sp::Node> parent) : sp::Node(parent)
     {
+        FastNoiseLite noise;
+        noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2S);
+        noise.SetFrequency(0.1);
+
         for(int y=0;y<tree.SIZE;y++) {
             for(int x=0;x<tree.SIZE;x++) {
-                tree.set(x,y, sp::irandom(-128, 127));
+                int value = noise.GetNoise(float(x), float(y)) * 1000;
+                LOG(Debug, x, y, value);
+                value = std::clamp(value, -128, 127);
+                tree.set(x, y, value & 0xFF);
             }
         }
+
         for(int x=0;x<tree.SIZE;x++) {
             tree.set(x, 0, 127);
             tree.set(x, tree.SIZE-1, 127);
@@ -198,9 +247,12 @@ public:
             tree.set(0, y, 127);
             tree.set(tree.SIZE-1, y, 127);
         }
+        for(int y=0;y<tree.SIZE;y++) {
+            for(int x=0;x<tree.SIZE;x++) {
+                LOG(Debug, x, y, tree.get(x, y));
+            }
+        }
 
-        // for(int n=0; n<5; n++)
-        //     data[(3+n)+(HEIGHT/2+n)*WIDTH] = 127 - n * 10;
         updateMesh();
     }
 
@@ -220,10 +272,10 @@ public:
         for(int y=0;y<tree.SIZE-1;y++) {
             for(int x=0;x<tree.SIZE-1;x++) {
                 int flags = 0;
-                auto a = tree.get(x+0, y+0);
-                auto b = tree.get(x+1, y+0);
-                auto c = tree.get(x+0, y+1);
-                auto d = tree.get(x+1, y+1);
+                auto a = int8_t(tree.get(x+0, y+0));
+                auto b = int8_t(tree.get(x+1, y+0));
+                auto c = int8_t(tree.get(x+0, y+1));
+                auto d = int8_t(tree.get(x+1, y+1));
                 if (a > 0) flags |= 0x01;
                 if (b > 0) flags |= 0x02;
                 if (c > 0) flags |= 0x04;
@@ -265,7 +317,6 @@ public:
                 }
             }
         }
-        LOG(Debug, shape.loops.size(), shape.chains.size());
 
         sp::MeshBuilder mb;
         for(const auto& chain : shape.chains) {
@@ -291,11 +342,57 @@ public:
         render_data.type = sp::RenderData::Type::Normal;
         render_data.shader = sp::Shader::get("internal:color.shader");
         render_data.mesh = mb.create();
+        // render_data.mesh = tree.createDebugMesh();
 
         setCollisionShape(shape);
     }
 
+    void digAt(sp::Vector2d center, double radius)
+    {
+        auto cp = sp::Vector2i(std::floor(center.x*2), std::floor(center.y*2));
+        auto extend = int(std::ceil(radius) * 2) + 1;
+        for(auto p : sp::Rect2i{cp - sp::Vector2i{extend, extend}, sp::Vector2i{extend*2, extend*2}}) {
+            auto wp = sp::Vector2d(p) * 0.5;
+            auto dist = (wp-center).length();
+            auto signed_distance = dist - radius;
+            if (signed_distance < 0) {
+                auto adjust = int(signed_distance * 255);
+                auto value = int8_t(tree.get(p.x, p.y));
+                value = std::max(value + adjust, -128);
+                tree.set(p.x, p.y, value & 0xFF);
+            }
+        }
+        updateMesh();
+    }
+
+private:
     QuadTree tree;
+};
+
+class PlayerPawn : public sp::Node
+{
+public:
+    PlayerPawn(sp::P<sp::Node> parent) : sp::Node(parent)
+    {
+        render_data.type = sp::RenderData::Type::Normal;
+        render_data.shader = sp::Shader::get("internal:color.shader");
+        render_data.mesh = sp::MeshData::createQuad({0.5f,0.5f});
+        render_data.color = sp::Color(0.2, 1.0, 0.2);
+
+        sp::collision::Box2D shape{0.5f,0.5f};
+        shape.fixed_rotation = true;
+        setCollisionShape(shape);
+    }
+
+    void onFixedUpdate() override
+    {
+        auto velocity = getLinearVelocity2D();
+        velocity.x = velocity.x * .5 + (key_move_x.getValue() * 5.0) * .5;
+        if (key_move_y.getValue() != 0.0)
+            velocity.y = velocity.y * .5 + (key_move_y.getValue() * 5.0) * .5;
+        velocity.y -= 9.8 * sp::Engine::fixed_update_delta;
+        setLinearVelocity(velocity);
+    }
 };
 
 class Scene : public sp::Scene
@@ -307,9 +404,9 @@ public:
         camera->setOrtographic({5.0,5.0});
         setDefaultCamera(camera);
 
-        // auto pdt = new PhotoDrawingTexture("20261017143044.png");
+        // auto pdt = new PhotoDrawingTexture("2.png");
         // for(int cnt=0; cnt<10;cnt++) {
-        //     auto n = new sp::Node(scene->getRoot());
+        //     auto n = new sp::Node(getRoot());
         //     n->render_data.type = sp::RenderData::Type::Subtractive;
         //     n->render_data.texture = pdt;
         //     n->render_data.shader = sp::Shader::get("internal:basic.shader");
@@ -334,6 +431,17 @@ public:
             test->setCollisionShape(shape);
             test->setLinearVelocity({1,1});
         }
+        player = new PlayerPawn(getRoot());
+        player->setPosition({5, 5});
+    }
+
+    void onUpdate(float delta) override
+    {
+        getCamera()->setPosition(player->getPosition2D());
+
+        if (key_dig.getDown()) {
+            msn->digAt(player->getPosition2D(), 1.0);
+        }
     }
 
     bool onPointerMove(sp::Ray3d ray, int id) override
@@ -353,19 +461,14 @@ public:
 
     void onPointerDrag(sp::Ray3d ray, int id) override {
         auto p = sp::Vector2d(ray.start.x, ray.start.y);
-        p -= msn->getPosition2D();
-        auto pi = sp::Vector2i(std::round(p.x*2), std::round(p.y*2));
-        cursor->setPosition(msn->getPosition2D() + sp::Vector2d(pi)*0.5);
-        if (pi.x >= 0 && pi.y >= 0 && pi.x < msn->tree.SIZE && pi.y < msn->tree.SIZE) {
-            msn->tree.set(pi.x, pi.y, msn->tree.get(pi.x, pi.y) - 1);
-            msn->updateMesh();
-        }
+        msn->digAt(p, 0.2);
     }
 
     void onPointerUp(sp::Ray3d ray, int id) override {}
 
     sp::P<MarchingSquaresNode> msn;
     sp::P<sp::Node> cursor;
+    sp::P<PlayerPawn> player;
 };
 
 int main(int argc, char** argv)
