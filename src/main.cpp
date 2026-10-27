@@ -156,16 +156,18 @@ public:
                 if (node[n] & TAG_BRANCH) {
                     f(nx, ny, size / 2, node[n] & ~TAG_BRANCH);
                 } else {
+                    float f = float(int8_t(node[n] & 0xFF) + 128) / 255.0;
                     mb.addQuad(
-                        {nx+size*0.1f, ny+size*0.1f},
-                        {nx+size*0.9f, ny+size*0.1f},
-                        {nx+size*0.1f, ny+size*0.9f},
-                        {nx+size*0.9f, ny+size*0.9f}
+                        {nx+size*0.1f, ny+size*0.1f, 0.0f},
+                        {nx+size*0.9f, ny+size*0.1f, 0.0f},
+                        {nx+size*0.1f, ny+size*0.9f, 0.0f},
+                        {nx+size*0.9f, ny+size*0.9f, 0.0f},
+                        {0.0f, f, 1.0f-f}
                     );
                 }
             }
         };
-        f(0, 0, SIZE / 4, 0);
+        f(0, 0, SIZE / 2, 0);
         return mb.create();
     }
 
@@ -247,6 +249,16 @@ public:
             }
         }
 
+        noise.SetSeed(13370);
+        for(int y=0;y<tree.SIZE;y++) {
+            for(int x=0;x<tree.SIZE;x++) {
+                auto value = tree.get(x, y);
+                if (int8_t(value) >= 0 && noise.GetNoise(float(x), float(y)) > 0) {
+                    tree.set(x, y, value | 0x100);
+                }
+            }
+        }
+
         updateMesh();
     }
 
@@ -311,37 +323,37 @@ public:
             }
         }
 
-        sp::MeshBuilder mb;
-        for(const auto& chain : shape.chains) {
-            auto p0 = chain.front();
-            for(auto it = chain.begin()+1; it!=chain.end(); it++) {
-                auto p1 = *it;
-                auto v = p1 - p0;
-                auto n = sp::Vector2f{v.y,-v.x}.normalized() * 0.05f;
-                mb.addQuad(p0 + n, p1 + n, p0 - n, p1 - n);
-                p0 = p1;
-            }
-        }
-        for(const auto& loop : shape.loops) {
-            auto p0 = loop.back();
-            for(auto p1 : loop) {
-                auto v = p1 - p0;
-                auto n = sp::Vector2f{v.y,-v.x}.normalized() * 0.05f;
-                mb.addQuad(p0 + n, p1 + n, p0 - n, p1 - n);
-                p0 = p1;
-            }
-        }
+        // sp::MeshBuilder mb;
+        // for(const auto& chain : shape.chains) {
+        //     auto p0 = chain.front();
+        //     for(auto it = chain.begin()+1; it!=chain.end(); it++) {
+        //         auto p1 = *it;
+        //         auto v = p1 - p0;
+        //         auto n = sp::Vector2f{v.y,-v.x}.normalized() * 0.05f;
+        //         mb.addQuad(p0 + n, p1 + n, p0 - n, p1 - n);
+        //         p0 = p1;
+        //     }
+        // }
+        // for(const auto& loop : shape.loops) {
+        //     auto p0 = loop.back();
+        //     for(auto p1 : loop) {
+        //         auto v = p1 - p0;
+        //         auto n = sp::Vector2f{v.y,-v.x}.normalized() * 0.05f;
+        //         mb.addQuad(p0 + n, p1 + n, p0 - n, p1 - n);
+        //         p0 = p1;
+        //     }
+        // }
 
-        render_data.type = sp::RenderData::Type::Normal;
-        render_data.shader = sp::Shader::get("internal:color.shader");
-        render_data.mesh = mb.create();
-        // render_data.mesh = tree.createDebugMesh();
+        // render_data.type = sp::RenderData::Type::Normal;
+        // render_data.shader = sp::Shader::get("internal:color.shader");
+        // render_data.mesh = mb.create();
 
         if (!texture) texture = new MarchingSquaresTexture();
         sp::Image img{{tree.SIZE, tree.SIZE}};
         for(int y=0;y<tree.SIZE;y++) {
             for(int x=0;x<tree.SIZE;x++) {
-                img.getPtr()[x+(tree.SIZE-1-y)*tree.SIZE] = ((tree.get(x, y) + 128) & 0xFF) | 0xFFFF0000;
+                auto value = tree.get(x, y);
+                img.getPtr()[x+(tree.SIZE-1-y)*tree.SIZE] = ((value + 128) & 0xFF) | (value & 0xFF00) | 0xFF000000;
             }
         }
 
@@ -351,9 +363,12 @@ public:
         render_data.type = sp::RenderData::Type::Normal;
         render_data.shader = sp::Shader::get("marchingsquares.shader");
         render_data.mesh = mb2.create();
-        render_data.texture = sp::texture_manager.get("greystone.png");
+        render_data.texture = sp::texture_manager.get("tiles.png");
         render_data.shader->bind();
         render_data.shader->setUniform("mapdata", texture, 1);
+        
+        // render_data.shader = sp::Shader::get("internal:normal_as_color.shader");
+        // render_data.mesh = tree.createDebugMesh();
 
         setCollisionShape(shape);
     }
@@ -368,9 +383,9 @@ public:
             auto signed_distance = dist - radius;
             if (signed_distance < 0) {
                 auto adjust = int(signed_distance * 255);
-                auto value = int8_t(tree.get(p.x, p.y));
-                value = std::max(value + adjust, -128);
-                tree.set(p.x, p.y, value & 0xFF);
+                auto value = tree.get(p.x, p.y);
+                value = (std::max(int8_t(value) + adjust, -128) & 0xFF) | (value & 0xFF00);
+                tree.set(p.x, p.y, value);
             }
         }
         updateMesh();

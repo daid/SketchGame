@@ -36,10 +36,14 @@ float lineSide(vec2 p, vec2 a, vec2 b)
 void main()
 {
     const float OFF = 1.0/64.0;
-    float a = texture2D(mapdata, v_uv + vec2(0.0, 0.0)).r - 0.5;
-    float b = texture2D(mapdata, v_uv + vec2(OFF, 0.0)).r - 0.5;
-    float c = texture2D(mapdata, v_uv + vec2(0.0,-OFF)).r - 0.5;
-    float d = texture2D(mapdata, v_uv + vec2(OFF,-OFF)).r - 0.5;
+    vec4 ca = texture2D(mapdata, v_uv + vec2(0.0, 0.0));
+    vec4 cb = texture2D(mapdata, v_uv + vec2(OFF, 0.0));
+    vec4 cc = texture2D(mapdata, v_uv + vec2(0.0,-OFF));
+    vec4 cd = texture2D(mapdata, v_uv + vec2(OFF,-OFF));
+    float a = ca.r - 0.5;
+    float b = cb.r - 0.5;
+    float c = cc.r - 0.5;
+    float d = cd.r - 0.5;
     vec2 p = fract(v_uv * 64);
     p.y = 1.0 - p.y;
 
@@ -48,7 +52,6 @@ void main()
     if (b >= 0.0) flags += 2;
     if (c >= 0.0) flags += 4;
     if (d >= 0.0) flags += 8;
-    gl_FragColor.rgb = texture2D(texture_map, p).rgb;
     if(flags == 0) {
         gl_FragColor.a = 0.0;
     } else if (flags == 1) {
@@ -105,4 +108,16 @@ void main()
         gl_FragColor.rgb = vec3(1,0,0);
         gl_FragColor.a = 1.0;
     }
+    float q = ca.g * (1.0-p.x) + cb.g * p.x;
+    float r = cc.g * (1.0-p.x) + cd.g * p.x;
+    float s = q * (1.0-p.y) + r * p.y;
+    float tile_type = round(s * 255.0);
+    q = a * (1.0-p.x) + b * p.x;
+    r = c * (1.0-p.x) + d * p.x;
+    s = q * (1.0-p.y) + r * p.y;
+    float tile_type2 = 0.0;
+    if (s > 0.25) tile_type2 = 0.5;
+    vec2 texture_offset = vec2(0.5 * tile_type, tile_type2);
+
+    gl_FragColor.rgb = texture2D(texture_map, texture_offset + fract(v_uv * 8.0) * 0.5).rgb;
 }
