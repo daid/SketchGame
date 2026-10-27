@@ -221,6 +221,14 @@ private:
     uint32_t freeList = TAG_BRANCH;
 };
 
+class MarchingSquaresTexture : public sp::OpenGLTexture
+{
+public:
+    MarchingSquaresTexture() : sp::OpenGLTexture(sp::Texture::Type::Dynamic, "") {}
+
+    void update(sp::Image&& img) { setImage(std::move(img)); }
+};
+
 class MarchingSquaresNode : public sp::Node
 {
 public:
@@ -233,23 +241,9 @@ public:
         for(int y=0;y<tree.SIZE;y++) {
             for(int x=0;x<tree.SIZE;x++) {
                 int value = noise.GetNoise(float(x), float(y)) * 1000;
-                LOG(Debug, x, y, value);
+                value -= (y - tree.SIZE/2) * 100;
                 value = std::clamp(value, -128, 127);
                 tree.set(x, y, value & 0xFF);
-            }
-        }
-
-        for(int x=0;x<tree.SIZE;x++) {
-            tree.set(x, 0, 127);
-            tree.set(x, tree.SIZE-1, 127);
-        }
-        for(int y=0;y<tree.SIZE;y++) {
-            tree.set(0, y, 127);
-            tree.set(tree.SIZE-1, y, 127);
-        }
-        for(int y=0;y<tree.SIZE;y++) {
-            for(int x=0;x<tree.SIZE;x++) {
-                LOG(Debug, x, y, tree.get(x, y));
             }
         }
 
@@ -258,7 +252,6 @@ public:
 
     void updateMesh()
     {
-        const float MESH_SCALE = 0.5f;
         auto m = [](int8_t a, int8_t b) -> float {
             auto d = a - b;
             sp2assert(a > 0, "?");
@@ -282,36 +275,36 @@ public:
                 if (d > 0) flags |= 0x08;
                 switch(flags) {
                 case 0: break;
-                case 1: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)}*MESH_SCALE,sp::Vector2f{x+m(a,b),y+0.0f}*MESH_SCALE); break;
-                case 2: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f}*MESH_SCALE,sp::Vector2f{x+1.0f,y+m(b,d)}*MESH_SCALE); break;
-                case 3: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)}*MESH_SCALE,sp::Vector2f{x+1.0f,y+m(b,d)}*MESH_SCALE); break;
-                case 4: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f}*MESH_SCALE,sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}*MESH_SCALE); break;
-                case 5: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f}*MESH_SCALE,sp::Vector2f{x+m(a,b),y+0.0f}*MESH_SCALE); break;
+                case 1: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)},sp::Vector2f{x+m(a,b),y+0.0f}); break;
+                case 2: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f},sp::Vector2f{x+1.0f,y+m(b,d)}); break;
+                case 3: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)},sp::Vector2f{x+1.0f,y+m(b,d)}); break;
+                case 4: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f},sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}); break;
+                case 5: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f},sp::Vector2f{x+m(a,b),y+0.0f}); break;
                 case 6:
                     if (b*c >= a*d) {
-                        shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f}*MESH_SCALE,sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}*MESH_SCALE);
-                        shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f}*MESH_SCALE,sp::Vector2f{x+1.0f,y+m(b,d)}*MESH_SCALE);
+                        shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f},sp::Vector2f{x+0.0f,y+1.0f-m(c,a)});
+                        shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f},sp::Vector2f{x+1.0f,y+m(b,d)});
                     } else {
-                        shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f}*MESH_SCALE,sp::Vector2f{x+1.0f,y+m(b,d)}*MESH_SCALE);
-                        shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f}*MESH_SCALE,sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}*MESH_SCALE);
+                        shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f},sp::Vector2f{x+1.0f,y+m(b,d)});
+                        shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f},sp::Vector2f{x+0.0f,y+1.0f-m(c,a)});
                     }
                     break;
-                case 7: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f}*MESH_SCALE,sp::Vector2f{x+1.0f,y+m(b,d)}*MESH_SCALE); break;
-                case 8: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)}*MESH_SCALE,sp::Vector2f{x+1.0f-m(d,c),y+1.0f}*MESH_SCALE); break;
+                case 7: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f},sp::Vector2f{x+1.0f,y+m(b,d)}); break;
+                case 8: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)},sp::Vector2f{x+1.0f-m(d,c),y+1.0f}); break;
                 case 9:
                     if (a*d >= b*c) {
-                        shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)}*MESH_SCALE,sp::Vector2f{x+1.0f-m(d,c),y+1.0f}*MESH_SCALE);
-                        shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)}*MESH_SCALE,sp::Vector2f{x+m(a,b),y+0.0f}*MESH_SCALE);
+                        shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)},sp::Vector2f{x+1.0f-m(d,c),y+1.0f});
+                        shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)},sp::Vector2f{x+m(a,b),y+0.0f});
                     } else {
-                        shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)}*MESH_SCALE,sp::Vector2f{x+m(a,b),y+0.0f}*MESH_SCALE);
-                        shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)}*MESH_SCALE,sp::Vector2f{x+1.0f-m(d,c),y+1.0f}*MESH_SCALE);
+                        shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)},sp::Vector2f{x+m(a,b),y+0.0f});
+                        shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)},sp::Vector2f{x+1.0f-m(d,c),y+1.0f});
                     }
                     break;
-                case 10: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f}*MESH_SCALE,sp::Vector2f{x+1.0f-m(d,c),y+1.0f}*MESH_SCALE); break;
-                case 11: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)}*MESH_SCALE,sp::Vector2f{x+1.0f-m(d,c),y+1.0f}*MESH_SCALE); break;
-                case 12: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)}*MESH_SCALE,sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}*MESH_SCALE); break;
-                case 13: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)}*MESH_SCALE,sp::Vector2f{x+m(a,b),y+0.0f}*MESH_SCALE); break;
-                case 14: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f}*MESH_SCALE,sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}*MESH_SCALE); break;
+                case 10: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f},sp::Vector2f{x+1.0f-m(d,c),y+1.0f}); break;
+                case 11: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)},sp::Vector2f{x+1.0f-m(d,c),y+1.0f}); break;
+                case 12: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)},sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}); break;
+                case 13: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)},sp::Vector2f{x+m(a,b),y+0.0f}); break;
+                case 14: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f},sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}); break;
                 case 15: break;
                 default: LOG(Debug, "??", flags);
                 }
@@ -344,15 +337,33 @@ public:
         render_data.mesh = mb.create();
         // render_data.mesh = tree.createDebugMesh();
 
+        if (!texture) texture = new MarchingSquaresTexture();
+        sp::Image img{{tree.SIZE, tree.SIZE}};
+        for(int y=0;y<tree.SIZE;y++) {
+            for(int x=0;x<tree.SIZE;x++) {
+                img.getPtr()[x+(tree.SIZE-1-y)*tree.SIZE] = ((tree.get(x, y) + 128) & 0xFF) | 0xFFFF0000;
+            }
+        }
+
+        sp::MeshBuilder mb2;
+        mb2.addQuad({0,0}, {tree.SIZE,0}, {0,tree.SIZE}, {tree.SIZE,tree.SIZE});
+        texture->update(std::move(img));
+        render_data.type = sp::RenderData::Type::Normal;
+        render_data.shader = sp::Shader::get("marchingsquares.shader");
+        render_data.mesh = mb2.create();
+        render_data.texture = sp::texture_manager.get("greystone.png");
+        render_data.shader->bind();
+        render_data.shader->setUniform("mapdata", texture, 1);
+
         setCollisionShape(shape);
     }
 
     void digAt(sp::Vector2d center, double radius)
     {
-        auto cp = sp::Vector2i(std::floor(center.x*2), std::floor(center.y*2));
-        auto extend = int(std::ceil(radius) * 2) + 1;
+        auto cp = sp::Vector2i(std::floor(center.x), std::floor(center.y));
+        auto extend = int(std::ceil(radius)) + 1;
         for(auto p : sp::Rect2i{cp - sp::Vector2i{extend, extend}, sp::Vector2i{extend*2, extend*2}}) {
-            auto wp = sp::Vector2d(p) * 0.5;
+            auto wp = sp::Vector2d(p);
             auto dist = (wp-center).length();
             auto signed_distance = dist - radius;
             if (signed_distance < 0) {
@@ -366,6 +377,7 @@ public:
     }
 
 private:
+    MarchingSquaresTexture* texture = nullptr;
     QuadTree tree;
 };
 
@@ -387,9 +399,9 @@ public:
     void onFixedUpdate() override
     {
         auto velocity = getLinearVelocity2D();
-        velocity.x = velocity.x * .5 + (key_move_x.getValue() * 5.0) * .5;
+        velocity.x = velocity.x * .5 + (key_move_x.getValue() * 10.0) * .5;
         if (key_move_y.getValue() != 0.0)
-            velocity.y = velocity.y * .5 + (key_move_y.getValue() * 5.0) * .5;
+            velocity.y = velocity.y * .5 + (key_move_y.getValue() * 10.0) * .5;
         velocity.y -= 9.8 * sp::Engine::fixed_update_delta;
         setLinearVelocity(velocity);
     }
@@ -401,7 +413,7 @@ public:
     Scene() : sp::Scene("MAIN")
     {
         auto camera = new sp::Camera(getRoot());
-        camera->setOrtographic({5.0,5.0});
+        camera->setOrtographic({15.0,15.0});
         setDefaultCamera(camera);
 
         // auto pdt = new PhotoDrawingTexture("2.png");
@@ -432,7 +444,7 @@ public:
             test->setLinearVelocity({1,1});
         }
         player = new PlayerPawn(getRoot());
-        player->setPosition({5, 5});
+        player->setPosition({QuadTree::SIZE / 2, QuadTree::SIZE});
     }
 
     void onUpdate(float delta) override
@@ -440,7 +452,7 @@ public:
         getCamera()->setPosition(player->getPosition2D());
 
         if (key_dig.getDown()) {
-            msn->digAt(player->getPosition2D(), 1.0);
+            msn->digAt(player->getPosition2D(), 2.0);
         }
     }
 
@@ -448,8 +460,8 @@ public:
     {
         auto p = sp::Vector2d(ray.start.x, ray.start.y);
         p -= msn->getPosition2D();
-        auto pi = sp::Vector2i(std::round(p.x*2), std::round(p.y*2));
-        cursor->setPosition(msn->getPosition2D() + sp::Vector2d(pi)*0.5);
+        auto pi = sp::Vector2i(std::round(p.x), std::round(p.y));
+        cursor->setPosition(msn->getPosition2D() + sp::Vector2d(pi));
         return false;
     }
 
