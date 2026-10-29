@@ -156,7 +156,7 @@ public:
                 if (node[n] & TAG_BRANCH) {
                     f(nx, ny, size / 2, node[n] & ~TAG_BRANCH);
                 } else {
-                    float f = float(int8_t(node[n] & 0xFF) + 128) / 255.0;
+                    float f = float(node[n] & 0xFF) / 255.0;
                     mb.addQuad(
                         {nx+size*0.1f, ny+size*0.1f, 0.0f},
                         {nx+size*0.9f, ny+size*0.1f, 0.0f},
@@ -217,7 +217,7 @@ private:
     }
 
     static constexpr uint32_t TAG_BRANCH = 0x80000000;
-    static constexpr uint32_t DEFAULT_VALUE = 0x00000080;
+    static constexpr uint32_t DEFAULT_VALUE = 0x00000000;
     using Node = std::array<uint32_t, 4>;
     std::vector<Node> data {{DEFAULT_VALUE,DEFAULT_VALUE,DEFAULT_VALUE,DEFAULT_VALUE}};
     uint32_t freeList = TAG_BRANCH;
@@ -243,9 +243,9 @@ public:
         for(int y=0;y<tree.SIZE;y++) {
             for(int x=0;x<tree.SIZE;x++) {
                 int value = noise.GetNoise(float(x), float(y)) * 1000;
-                value -= (y - tree.SIZE/2) * 100;
-                value = std::clamp(value, -128, 127);
-                tree.set(x, y, value & 0xFF);
+                value -= (y - tree.SIZE*3/4) * 100;
+                value = std::clamp(value, 0, 255);
+                tree.set(x, y, value);
             }
         }
 
@@ -253,7 +253,7 @@ public:
         for(int y=0;y<tree.SIZE;y++) {
             for(int x=0;x<tree.SIZE;x++) {
                 auto value = tree.get(x, y);
-                if (int8_t(value) >= 0 && noise.GetNoise(float(x), float(y)) > 0) {
+                if (uint8_t(value) > 128 && noise.GetNoise(float(x), float(y)) > 0) {
                     tree.set(x, y, value | 0x100);
                 }
             }
@@ -264,7 +264,20 @@ public:
 
     void updateMesh()
     {
-        auto m = [](int8_t a, int8_t b) -> float {
+        for(auto p : sp::Rect2i({0,0}, {CHUNK_SIDE_COUNT,CHUNK_SIDE_COUNT})) {
+            updateMesh(p);
+        }
+
+        // render_data.type = sp::RenderData::Type::Normal;
+        // render_data.shader = sp::Shader::get("internal:normal_as_color.shader");
+        // render_data.mesh = tree.createDebugMesh();
+    }
+
+    void updateMesh(sp::Vector2i chunk_pos)
+    {
+        auto m = [](int a, int b) -> float {
+            a -= 128;
+            b -= 128;
             auto d = a - b;
             sp2assert(a > 0, "?");
             sp2assert(d > 0, "?");
@@ -274,103 +287,82 @@ public:
             return res;
         };
         sp::collision::Chains2D shape;
-        for(int y=0;y<tree.SIZE-1;y++) {
-            for(int x=0;x<tree.SIZE-1;x++) {
-                int flags = 0;
-                auto a = int8_t(tree.get(x+0, y+0));
-                auto b = int8_t(tree.get(x+1, y+0));
-                auto c = int8_t(tree.get(x+0, y+1));
-                auto d = int8_t(tree.get(x+1, y+1));
-                if (a > 0) flags |= 0x01;
-                if (b > 0) flags |= 0x02;
-                if (c > 0) flags |= 0x04;
-                if (d > 0) flags |= 0x08;
-                switch(flags) {
-                case 0: break;
-                case 1: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)},sp::Vector2f{x+m(a,b),y+0.0f}); break;
-                case 2: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f},sp::Vector2f{x+1.0f,y+m(b,d)}); break;
-                case 3: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)},sp::Vector2f{x+1.0f,y+m(b,d)}); break;
-                case 4: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f},sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}); break;
-                case 5: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f},sp::Vector2f{x+m(a,b),y+0.0f}); break;
-                case 6:
-                    if (b*c >= a*d) {
-                        shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f},sp::Vector2f{x+0.0f,y+1.0f-m(c,a)});
-                        shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f},sp::Vector2f{x+1.0f,y+m(b,d)});
-                    } else {
-                        shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f},sp::Vector2f{x+1.0f,y+m(b,d)});
-                        shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f},sp::Vector2f{x+0.0f,y+1.0f-m(c,a)});
-                    }
-                    break;
-                case 7: shape.addLine(sp::Vector2f{x+m(c,d),y+1.0f},sp::Vector2f{x+1.0f,y+m(b,d)}); break;
-                case 8: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)},sp::Vector2f{x+1.0f-m(d,c),y+1.0f}); break;
-                case 9:
-                    if (a*d >= b*c) {
-                        shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)},sp::Vector2f{x+1.0f-m(d,c),y+1.0f});
-                        shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)},sp::Vector2f{x+m(a,b),y+0.0f});
-                    } else {
-                        shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)},sp::Vector2f{x+m(a,b),y+0.0f});
-                        shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)},sp::Vector2f{x+1.0f-m(d,c),y+1.0f});
-                    }
-                    break;
-                case 10: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f},sp::Vector2f{x+1.0f-m(d,c),y+1.0f}); break;
-                case 11: shape.addLine(sp::Vector2f{x+0.0f,y+m(a,c)},sp::Vector2f{x+1.0f-m(d,c),y+1.0f}); break;
-                case 12: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)},sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}); break;
-                case 13: shape.addLine(sp::Vector2f{x+1.0f,y+1.0f-m(d,b)},sp::Vector2f{x+m(a,b),y+0.0f}); break;
-                case 14: shape.addLine(sp::Vector2f{x+1.0f-m(b,a),y+0.0f},sp::Vector2f{x+0.0f,y+1.0f-m(c,a)}); break;
-                case 15: break;
-                default: LOG(Debug, "??", flags);
+        for(auto p : sp::Rect2i({0,0}, {CHUNK_SIZE, CHUNK_SIZE})) {
+            int flags = 0;
+            auto a = uint8_t(tree.get(p.x+0+chunk_pos.x*CHUNK_SIZE, p.y+0+chunk_pos.y*CHUNK_SIZE));
+            auto b = uint8_t(tree.get(p.x+1+chunk_pos.x*CHUNK_SIZE, p.y+0+chunk_pos.y*CHUNK_SIZE));
+            auto c = uint8_t(tree.get(p.x+0+chunk_pos.x*CHUNK_SIZE, p.y+1+chunk_pos.y*CHUNK_SIZE));
+            auto d = uint8_t(tree.get(p.x+1+chunk_pos.x*CHUNK_SIZE, p.y+1+chunk_pos.y*CHUNK_SIZE));
+            if (a > 128) flags |= 0x01;
+            if (b > 128) flags |= 0x02;
+            if (c > 128) flags |= 0x04;
+            if (d > 128) flags |= 0x08;
+            switch(flags) {
+            case 0: break;
+            case 1: shape.addLine(sp::Vector2f{p.x+0.0f,p.y+m(a,c)},sp::Vector2f{p.x+m(a,b),p.y+0.0f}); break;
+            case 2: shape.addLine(sp::Vector2f{p.x+1.0f-m(b,a),p.y+0.0f},sp::Vector2f{p.x+1.0f,p.y+m(b,d)}); break;
+            case 3: shape.addLine(sp::Vector2f{p.x+0.0f,p.y+m(a,c)},sp::Vector2f{p.x+1.0f,p.y+m(b,d)}); break;
+            case 4: shape.addLine(sp::Vector2f{p.x+m(c,d),p.y+1.0f},sp::Vector2f{p.x+0.0f,p.y+1.0f-m(c,a)}); break;
+            case 5: shape.addLine(sp::Vector2f{p.x+m(c,d),p.y+1.0f},sp::Vector2f{p.x+m(a,b),p.y+0.0f}); break;
+            case 6:
+                if (b*c >= a*d) {
+                    shape.addLine(sp::Vector2f{p.x+1.0f-m(b,a),p.y+0.0f},sp::Vector2f{p.x+0.0f,p.y+1.0f-m(c,a)});
+                    shape.addLine(sp::Vector2f{p.x+m(c,d),p.y+1.0f},sp::Vector2f{p.x+1.0f,p.y+m(b,d)});
+                } else {
+                    shape.addLine(sp::Vector2f{p.x+1.0f-m(b,a),p.y+0.0f},sp::Vector2f{p.x+1.0f,p.y+m(b,d)});
+                    shape.addLine(sp::Vector2f{p.x+m(c,d),p.y+1.0f},sp::Vector2f{p.x+0.0f,p.y+1.0f-m(c,a)});
                 }
+                break;
+            case 7: shape.addLine(sp::Vector2f{p.x+m(c,d),p.y+1.0f},sp::Vector2f{p.x+1.0f,p.y+m(b,d)}); break;
+            case 8: shape.addLine(sp::Vector2f{p.x+1.0f,p.y+1.0f-m(d,b)},sp::Vector2f{p.x+1.0f-m(d,c),p.y+1.0f}); break;
+            case 9:
+                if (a*d >= b*c) {
+                    shape.addLine(sp::Vector2f{p.x+0.0f,p.y+m(a,c)},sp::Vector2f{p.x+1.0f-m(d,c),p.y+1.0f});
+                    shape.addLine(sp::Vector2f{p.x+1.0f,p.y+1.0f-m(d,b)},sp::Vector2f{p.x+m(a,b),p.y+0.0f});
+                } else {
+                    shape.addLine(sp::Vector2f{p.x+0.0f,p.y+m(a,c)},sp::Vector2f{p.x+m(a,b),p.y+0.0f});
+                    shape.addLine(sp::Vector2f{p.x+1.0f,p.y+1.0f-m(d,b)},sp::Vector2f{p.x+1.0f-m(d,c),p.y+1.0f});
+                }
+                break;
+            case 10: shape.addLine(sp::Vector2f{p.x+1.0f-m(b,a),p.y+0.0f},sp::Vector2f{p.x+1.0f-m(d,c),p.y+1.0f}); break;
+            case 11: shape.addLine(sp::Vector2f{p.x+0.0f,p.y+m(a,c)},sp::Vector2f{p.x+1.0f-m(d,c),p.y+1.0f}); break;
+            case 12: shape.addLine(sp::Vector2f{p.x+1.0f,p.y+1.0f-m(d,b)},sp::Vector2f{p.x+0.0f,p.y+1.0f-m(c,a)}); break;
+            case 13: shape.addLine(sp::Vector2f{p.x+1.0f,p.y+1.0f-m(d,b)},sp::Vector2f{p.x+m(a,b),p.y+0.0f}); break;
+            case 14: shape.addLine(sp::Vector2f{p.x+1.0f-m(b,a),p.y+0.0f},sp::Vector2f{p.x+0.0f,p.y+1.0f-m(c,a)}); break;
+            case 15: break;
+            default: LOG(Debug, "??", flags);
             }
         }
 
-        // sp::MeshBuilder mb;
-        // for(const auto& chain : shape.chains) {
-        //     auto p0 = chain.front();
-        //     for(auto it = chain.begin()+1; it!=chain.end(); it++) {
-        //         auto p1 = *it;
-        //         auto v = p1 - p0;
-        //         auto n = sp::Vector2f{v.y,-v.x}.normalized() * 0.05f;
-        //         mb.addQuad(p0 + n, p1 + n, p0 - n, p1 - n);
-        //         p0 = p1;
-        //     }
-        // }
-        // for(const auto& loop : shape.loops) {
-        //     auto p0 = loop.back();
-        //     for(auto p1 : loop) {
-        //         auto v = p1 - p0;
-        //         auto n = sp::Vector2f{v.y,-v.x}.normalized() * 0.05f;
-        //         mb.addQuad(p0 + n, p1 + n, p0 - n, p1 - n);
-        //         p0 = p1;
-        //     }
-        // }
+        auto& ci = chunk_info[chunk_pos.x + chunk_pos.y * CHUNK_SIDE_COUNT];
 
-        // render_data.type = sp::RenderData::Type::Normal;
-        // render_data.shader = sp::Shader::get("internal:color.shader");
-        // render_data.mesh = mb.create();
-
-        if (!texture) texture = new MarchingSquaresTexture();
-        sp::Image img{{tree.SIZE, tree.SIZE}};
-        for(int y=0;y<tree.SIZE;y++) {
-            for(int x=0;x<tree.SIZE;x++) {
-                auto value = tree.get(x, y);
-                img.getPtr()[x+(tree.SIZE-1-y)*tree.SIZE] = ((value + 128) & 0xFF) | (value & 0xFF00) | 0xFF000000;
-            }
+        if (!ci.texture) ci.texture = new MarchingSquaresTexture();
+        sp::Image img{{CHUNK_SIZE+1, CHUNK_SIZE+1}};
+        for(auto p : sp::Rect2i({0,0}, {CHUNK_SIZE+1, CHUNK_SIZE+1})) {
+            img.getPtr()[p.x+p.y*(CHUNK_SIZE+1)] = tree.get(p.x+chunk_pos.x*CHUNK_SIZE, p.y+chunk_pos.y*CHUNK_SIZE) | 0xFF000000;
         }
 
-        sp::MeshBuilder mb2;
-        mb2.addQuad({0,0}, {tree.SIZE,0}, {0,tree.SIZE}, {tree.SIZE,tree.SIZE});
-        texture->update(std::move(img));
-        render_data.type = sp::RenderData::Type::Normal;
-        render_data.shader = sp::Shader::get("marchingsquares.shader");
-        render_data.mesh = mb2.create();
-        render_data.texture = sp::texture_manager.get("tiles.png");
-        render_data.shader->bind();
-        render_data.shader->setUniform("mapdata", texture, 1);
-        
-        // render_data.shader = sp::Shader::get("internal:normal_as_color.shader");
-        // render_data.mesh = tree.createDebugMesh();
+        ci.texture->update(std::move(img));
+        if (!ci.node) {
+            sp::MeshData::Vertices vertices;
+            sp::MeshData::Indices indices{0,1,2, 2,1,3};
+            static const float u = float(CHUNK_SIZE) / float(CHUNK_SIZE+1);
+            static const float v = float(1) / float(CHUNK_SIZE+1);
+            vertices.emplace_back(sp::Vector3f{0,0,0}, sp::Vector2f{0,v});
+            vertices.emplace_back(sp::Vector3f{CHUNK_SIZE,0,0}, sp::Vector2f{u,v});
+            vertices.emplace_back(sp::Vector3f{0,CHUNK_SIZE,0}, sp::Vector2f{0,1});
+            vertices.emplace_back(sp::Vector3f{CHUNK_SIZE,CHUNK_SIZE,0}, sp::Vector2f{u,1});
+            ci.node = new Node(getParent());
+            ci.node->setPosition(sp::Vector2d(chunk_pos*CHUNK_SIZE));
+            ci.node->render_data.type = sp::RenderData::Type::Normal;
+            ci.node->render_data.shader = sp::Shader::get("marchingsquares.shader");
+            ci.node->render_data.mesh = sp::MeshData::create(std::move(vertices), std::move(indices));
+            ci.node->render_data.texture = ci.texture;
+            ci.node->render_data.shader->bind();
+            ci.node->render_data.shader->setUniform("tile_texture", sp::texture_manager.get("tiles.png"), 1);
+        }
 
-        setCollisionShape(shape);
+        ci.node->setCollisionShape(shape);
     }
 
     void digAt(sp::Vector2d center, double radius)
@@ -383,8 +375,20 @@ public:
             auto signed_distance = dist - radius;
             if (signed_distance < 0) {
                 auto adjust = int(signed_distance * 255);
-                auto value = tree.get(p.x, p.y);
-                value = (std::max(int8_t(value) + adjust, -128) & 0xFF) | (value & 0xFF00);
+                auto old_value = tree.get(p.x, p.y);
+                auto value = (std::max(uint8_t(old_value) + adjust, 0) & 0xFF) | (old_value & 0xFF00);
+                if (uint8_t(value) <= 128 && uint8_t(old_value) > 128) {
+                    auto test = new sp::Node(getParent());
+                    test->setPosition(sp::Vector2d(p));
+                    test->render_data.type = sp::RenderData::Type::Normal;
+                    test->render_data.shader = sp::Shader::get("internal:color.shader");
+                    test->render_data.mesh = sp::MeshData::createQuad({0.2f,0.2f});
+                    test->render_data.color = sp::HsvColor(sp::random(0, 360), 100, 100);
+                    sp::collision::Box2D shape{0.2f,0.2f};
+                    shape.restitution = 1.1;
+                    test->setCollisionShape(shape);
+                    test->setLinearVelocity({sp::random(-1,1),sp::random(-1,1)});
+                }
                 tree.set(p.x, p.y, value);
             }
         }
@@ -392,7 +396,14 @@ public:
     }
 
 private:
-    MarchingSquaresTexture* texture = nullptr;
+    static constexpr int CHUNK_SIZE = 8;
+    static constexpr int CHUNK_SIDE_COUNT = QuadTree::SIZE/CHUNK_SIZE;
+    struct ChunkInfo {
+        MarchingSquaresTexture* texture = nullptr;
+        sp::P<sp::Node> node;
+    };
+    std::array<ChunkInfo, CHUNK_SIDE_COUNT*CHUNK_SIDE_COUNT> chunk_info;
+
     QuadTree tree;
 };
 
@@ -448,16 +459,16 @@ public:
         cursor->render_data.type = sp::RenderData::Type::Normal;
         cursor->render_data.shader = sp::Shader::get("internal:color.shader");
         cursor->render_data.mesh = sp::MeshData::createQuad({0.2f,0.2f});
-        for(int n=0; n<10; n++) {
-            auto test = new sp::Node(getRoot());
-            test->render_data.type = sp::RenderData::Type::Normal;
-            test->render_data.shader = sp::Shader::get("internal:color.shader");
-            test->render_data.mesh = sp::MeshData::createQuad({0.2f,0.2f});
-            sp::collision::Box2D shape{0.2f,0.2f};
-            shape.restitution = 1.1;
-            test->setCollisionShape(shape);
-            test->setLinearVelocity({1,1});
-        }
+        // for(int n=0; n<10; n++) {
+        //     auto test = new sp::Node(getRoot());
+        //     test->render_data.type = sp::RenderData::Type::Normal;
+        //     test->render_data.shader = sp::Shader::get("internal:color.shader");
+        //     test->render_data.mesh = sp::MeshData::createQuad({0.2f,0.2f});
+        //     sp::collision::Box2D shape{0.2f,0.2f};
+        //     shape.restitution = 1.1;
+        //     test->setCollisionShape(shape);
+        //     test->setLinearVelocity({1,1});
+        // }
         player = new PlayerPawn(getRoot());
         player->setPosition({QuadTree::SIZE / 2, QuadTree::SIZE});
     }

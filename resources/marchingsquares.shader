@@ -18,7 +18,7 @@ void main()
 
 [FRAGMENT]
 uniform sampler2D texture_map;
-uniform sampler2D mapdata;
+uniform sampler2D tile_texture;
 uniform vec4 color;
 
 varying vec2 v_uv;
@@ -35,16 +35,17 @@ float lineSide(vec2 p, vec2 a, vec2 b)
 
 void main()
 {
-    const float OFF = 1.0/64.0;
-    vec4 ca = texture2D(mapdata, v_uv + vec2(0.0, 0.0));
-    vec4 cb = texture2D(mapdata, v_uv + vec2(OFF, 0.0));
-    vec4 cc = texture2D(mapdata, v_uv + vec2(0.0,-OFF));
-    vec4 cd = texture2D(mapdata, v_uv + vec2(OFF,-OFF));
+    const float TEXTURE_SIZE = 9.0;
+    const float OFF = 1.0/TEXTURE_SIZE;
+    vec4 ca = texture2D(texture_map, v_uv + vec2(0.0, 0.0));
+    vec4 cb = texture2D(texture_map, v_uv + vec2(OFF, 0.0));
+    vec4 cc = texture2D(texture_map, v_uv + vec2(0.0,-OFF));
+    vec4 cd = texture2D(texture_map, v_uv + vec2(OFF,-OFF));
     float a = ca.r - 0.5;
     float b = cb.r - 0.5;
     float c = cc.r - 0.5;
     float d = cd.r - 0.5;
-    vec2 p = fract(v_uv * 64);
+    vec2 p = fract(v_uv * TEXTURE_SIZE);
     p.y = 1.0 - p.y;
 
     int flags = 0;
@@ -117,7 +118,7 @@ void main()
     s = q * (1.0-p.y) + r * p.y;
     float tile_type2 = 0.0;
     if (s > 0.25) tile_type2 = 0.5;
-    vec2 texture_offset = vec2(0.5 * tile_type, tile_type2);
 
-    gl_FragColor.rgb = texture2D(texture_map, texture_offset + fract(v_uv * 8.0) * 0.5).rgb;
+    vec2 texture_offset = vec2(0.5 * tile_type, tile_type2);
+    gl_FragColor.rgb = texture2D(tile_texture, texture_offset + fract(v_uv * 8.0) * 0.5).rgb;
 }
