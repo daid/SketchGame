@@ -35,6 +35,8 @@
 sp::io::Keybinding key_move_x{"MOVE_X", {"-left", "right"}};
 sp::io::Keybinding key_move_y{"MOVE_Y", {"-down", "up"}};
 sp::io::Keybinding key_dig{"DIG", {"space"}};
+sp::io::Keybinding key_dig2{"DIG2", {"z"}};
+sp::io::Keybinding key_zoom{"ZOOM", {"=", "--"}};
 
 sp::P<sp::Window> window;
 
@@ -117,6 +119,41 @@ public:
     }
 };
 
+class TestNode : public sp::Node
+{
+public:
+    TestNode(sp::P<sp::Node> parent, float size) : sp::Node(parent)
+    {
+        static auto pdt = new PhotoDrawingTexture("phenix.png");
+        render_data.type = sp::RenderData::Type::Subtractive;
+        render_data.shader = sp::Shader::get("internal:basic.shader");
+        render_data.mesh = pdt->mesh;//sp::MeshData::createQuad({0.6f,0.6f});
+        //render_data.color = sp::HsvColor(sp::random(0, 360), 100, 100);
+        render_data.texture = pdt;
+        render_data.scale = {size,size,1.0};
+        sp::collision::Box2D shape{0.4f*size,0.4f*size};
+        shape.restitution = 0.5;
+        setCollisionShape(shape);
+        setLinearVelocity({sp::random(-1,1),sp::random(-1,1)});
+    }
+
+    void onCollision(sp::CollisionInfo& info) override
+    {
+        sp::P<TestNode> other = info.other;
+        if (other) {
+            auto nn = new TestNode(getParent(), (render_data.scale.x + other->render_data.scale.x) * 0.7);
+            nn->setPosition(info.position);
+            info.other.destroy();
+            delete this;
+        }
+    }
+
+    void onFixedUpdate() override
+    {
+        setLinearVelocity(getLinearVelocity2D() - sp::Vector2d(0, 9.8) * double(sp::Engine::fixed_update_delta));
+    }
+};
+
 class QuadTree
 {
 public:
@@ -171,7 +208,7 @@ public:
         return mb.create();
     }
 
-    static constexpr unsigned int MAX_DEPTH = 6;
+    static constexpr unsigned int MAX_DEPTH = 12;
     static constexpr int SIZE = 1 << MAX_DEPTH;
 private:
     bool setImpl(uint32_t node_idx, int x, int y, int depth, uint32_t new_value)
@@ -243,7 +280,7 @@ public:
         for(int y=0;y<tree.SIZE;y++) {
             for(int x=0;x<tree.SIZE;x++) {
                 int value = noise.GetNoise(float(x), float(y)) * 1000;
-                value -= (y - tree.SIZE*3/4) * 100;
+                value -= (y - std::sin(x*0.01) * 100 - tree.SIZE*3/4) * 100;
                 value = std::clamp(value, 0, 255);
                 tree.set(x, y, value);
             }
@@ -257,9 +294,19 @@ public:
                     tree.set(x, y, value | 0x100);
                 }
             }
+            LOG(Debug, y);
         }
 
         updateMesh();
+    }
+
+    void updateMesh(sp::Rect2i area)
+    {
+        auto begin = area.position / CHUNK_SIZE;
+        auto end = (area.position + area.size) / CHUNK_SIZE;
+        for(auto p : sp::Rect2i(begin, end-begin+sp::Vector2i{1, 1})) {
+            updateMesh(p);
+        }
     }
 
     void updateMesh()
@@ -271,6 +318,27 @@ public:
         // render_data.type = sp::RenderData::Type::Normal;
         // render_data.shader = sp::Shader::get("internal:normal_as_color.shader");
         // render_data.mesh = tree.createDebugMesh();
+
+        // render_data.type = sp::RenderData::Type::Normal;
+        // render_data.shader = sp::Shader::get("internal:normal_as_color.shader");
+        // render_data.mesh = createDebugMesh();
+        // render_data.order = 10;
+    }
+
+    std::shared_ptr<sp::MeshData> createDebugMesh()
+    {
+        sp::MeshBuilder mb;
+        for(auto p : sp::Rect2i({0,0}, {CHUNK_SIDE_COUNT, CHUNK_SIDE_COUNT})) {
+            auto& ci = chunk_info[p.x+p.y*CHUNK_SIDE_COUNT];
+            mb.addQuad(
+                {p.x * CHUNK_SIZE + CHUNK_SIZE * 0.1f, p.y * CHUNK_SIZE + CHUNK_SIZE * 0.1f, 0.0f},
+                {p.x * CHUNK_SIZE + CHUNK_SIZE * 0.9f, p.y * CHUNK_SIZE + CHUNK_SIZE * 0.1f, 0.0f},
+                {p.x * CHUNK_SIZE + CHUNK_SIZE * 0.1f, p.y * CHUNK_SIZE + CHUNK_SIZE * 0.9f, 0.0f},
+                {p.x * CHUNK_SIZE + CHUNK_SIZE * 0.9f, p.y * CHUNK_SIZE + CHUNK_SIZE * 0.9f, 0.0f},
+                {ci.node ? 1.0f : 0.0f, ci.texture ? 1.0f : 0.0f, 0.0f}
+            );
+        }
+        return mb.create();
     }
 
     void updateMesh(sp::Vector2i chunk_pos)
@@ -334,35 +402,39 @@ public:
             }
         }
 
-        auto& ci = chunk_info[chunk_pos.x + chunk_pos.y * CHUNK_SIDE_COUNT];
-
-        if (!ci.texture) ci.texture = new MarchingSquaresTexture();
         sp::Image img{{CHUNK_SIZE+1, CHUNK_SIZE+1}};
+        bool filled = false;
         for(auto p : sp::Rect2i({0,0}, {CHUNK_SIZE+1, CHUNK_SIZE+1})) {
-            img.getPtr()[p.x+p.y*(CHUNK_SIZE+1)] = tree.get(p.x+chunk_pos.x*CHUNK_SIZE, p.y+chunk_pos.y*CHUNK_SIZE) | 0xFF000000;
+            auto value = tree.get(p.x+chunk_pos.x*CHUNK_SIZE, p.y+chunk_pos.y*CHUNK_SIZE);
+            img.getPtr()[p.x+p.y*(CHUNK_SIZE+1)] = value | 0xFF000000;
+            if ((value & 0xFF) > 128) filled = true;
         }
 
-        ci.texture->update(std::move(img));
-        if (!ci.node) {
-            sp::MeshData::Vertices vertices;
-            sp::MeshData::Indices indices{0,1,2, 2,1,3};
-            static const float u = float(CHUNK_SIZE) / float(CHUNK_SIZE+1);
-            static const float v = float(1) / float(CHUNK_SIZE+1);
-            vertices.emplace_back(sp::Vector3f{0,0,0}, sp::Vector2f{0,v});
-            vertices.emplace_back(sp::Vector3f{CHUNK_SIZE,0,0}, sp::Vector2f{u,v});
-            vertices.emplace_back(sp::Vector3f{0,CHUNK_SIZE,0}, sp::Vector2f{0,1});
-            vertices.emplace_back(sp::Vector3f{CHUNK_SIZE,CHUNK_SIZE,0}, sp::Vector2f{u,1});
-            ci.node = new Node(getParent());
-            ci.node->setPosition(sp::Vector2d(chunk_pos*CHUNK_SIZE));
+        auto& ci = chunk_info[chunk_pos.x + chunk_pos.y * CHUNK_SIDE_COUNT];
+        if (filled)
+        {
+            if (!ci.texture) ci.texture = new MarchingSquaresTexture();
+            ci.texture->update(std::move(img));
+            createNode(chunk_pos);
             ci.node->render_data.type = sp::RenderData::Type::Normal;
-            ci.node->render_data.shader = sp::Shader::get("marchingsquares.shader");
-            ci.node->render_data.mesh = sp::MeshData::create(std::move(vertices), std::move(indices));
             ci.node->render_data.texture = ci.texture;
-            ci.node->render_data.shader->bind();
-            ci.node->render_data.shader->setUniform("tile_texture", sp::texture_manager.get("tiles.png"), 1);
+        } else {
+            if (ci.node) {
+                ci.node->render_data.type = sp::RenderData::Type::None;
+                ci.node->render_data.texture = nullptr;
+            }
         }
 
-        ci.node->setCollisionShape(shape);
+        if (shape.chains.size() > 0 || shape.loops.size() > 0) {
+            createNode(chunk_pos);
+            ci.node->setCollisionShape(shape);
+        } else {
+            if (ci.node) {
+                ci.node->removeCollisionShape();
+                if (!filled)
+                    ci.node.destroy();
+            }
+        }
     }
 
     void digAt(sp::Vector2d center, double radius)
@@ -378,25 +450,17 @@ public:
                 auto old_value = tree.get(p.x, p.y);
                 auto value = (std::max(uint8_t(old_value) + adjust, 0) & 0xFF) | (old_value & 0xFF00);
                 if (uint8_t(value) <= 128 && uint8_t(old_value) > 128) {
-                    auto test = new sp::Node(getParent());
+                    auto test = new TestNode(getParent(), 1.0);
                     test->setPosition(sp::Vector2d(p));
-                    test->render_data.type = sp::RenderData::Type::Normal;
-                    test->render_data.shader = sp::Shader::get("internal:color.shader");
-                    test->render_data.mesh = sp::MeshData::createQuad({0.2f,0.2f});
-                    test->render_data.color = sp::HsvColor(sp::random(0, 360), 100, 100);
-                    sp::collision::Box2D shape{0.2f,0.2f};
-                    shape.restitution = 1.1;
-                    test->setCollisionShape(shape);
-                    test->setLinearVelocity({sp::random(-1,1),sp::random(-1,1)});
                 }
                 tree.set(p.x, p.y, value);
             }
         }
-        updateMesh();
+        updateMesh({cp - sp::Vector2i{extend, extend}, sp::Vector2i{extend*2, extend*2}});
     }
 
 private:
-    static constexpr int CHUNK_SIZE = 8;
+    static constexpr int CHUNK_SIZE = 128;
     static constexpr int CHUNK_SIDE_COUNT = QuadTree::SIZE/CHUNK_SIZE;
     struct ChunkInfo {
         MarchingSquaresTexture* texture = nullptr;
@@ -405,6 +469,30 @@ private:
     std::array<ChunkInfo, CHUNK_SIDE_COUNT*CHUNK_SIDE_COUNT> chunk_info;
 
     QuadTree tree;
+
+    void createNode(sp::Vector2i chunk_pos)
+    {
+        static std::shared_ptr<sp::MeshData> chunk_mesh;
+        auto& ci = chunk_info[chunk_pos.x + chunk_pos.y * CHUNK_SIDE_COUNT];
+        if (ci.node) return;
+        if (!chunk_mesh) {
+            sp::MeshData::Vertices vertices;
+            sp::MeshData::Indices indices{0,1,2, 2,1,3};
+            static const float u0 = 0.0f;
+            static const float v0 = 0.0f;
+            static const float u1 = float(CHUNK_SIZE) / float(CHUNK_SIZE+1);
+            static const float v1 = float(CHUNK_SIZE) / float(CHUNK_SIZE+1);
+            vertices.emplace_back(sp::Vector3f{0,0,0}, sp::Vector2f{u0,v0});
+            vertices.emplace_back(sp::Vector3f{CHUNK_SIZE,0,0}, sp::Vector2f{u1,v0});
+            vertices.emplace_back(sp::Vector3f{0,CHUNK_SIZE,0}, sp::Vector2f{u0,v1});
+            vertices.emplace_back(sp::Vector3f{CHUNK_SIZE,CHUNK_SIZE,0}, sp::Vector2f{u1,v1});
+            chunk_mesh = sp::MeshData::create(std::move(vertices), std::move(indices));
+        }
+        ci.node = new Node(getParent());
+        ci.node->setPosition(sp::Vector2d(chunk_pos*CHUNK_SIZE));
+        ci.node->render_data.shader = sp::Shader::get("marchingsquares.shader");
+        ci.node->render_data.mesh = chunk_mesh;
+    }
 };
 
 class PlayerPawn : public sp::Node
@@ -412,10 +500,11 @@ class PlayerPawn : public sp::Node
 public:
     PlayerPawn(sp::P<sp::Node> parent) : sp::Node(parent)
     {
-        render_data.type = sp::RenderData::Type::Normal;
-        render_data.shader = sp::Shader::get("internal:color.shader");
-        render_data.mesh = sp::MeshData::createQuad({0.5f,0.5f});
-        render_data.color = sp::Color(0.2, 1.0, 0.2);
+        static auto pdt = new PhotoDrawingTexture("pumpkin.png");
+        render_data.type = sp::RenderData::Type::Subtractive;
+        render_data.shader = sp::Shader::get("internal:basic.shader");
+        render_data.texture = pdt;
+        render_data.mesh = pdt->mesh;
 
         sp::collision::Box2D shape{0.5f,0.5f};
         shape.fixed_rotation = true;
@@ -480,6 +569,14 @@ public:
         if (key_dig.getDown()) {
             msn->digAt(player->getPosition2D(), 2.0);
         }
+        if (key_dig2.getDown()) {
+            msn->digAt(player->getPosition2D(), 10.0);
+        }
+        if (key_zoom.getValue() != 0) {
+            auto camera = getCamera();
+            zoom *= 1.0 + 0.1 * key_zoom.getValue();
+            camera->setOrtographic({zoom, zoom});
+        }
     }
 
     bool onPointerMove(sp::Ray3d ray, int id) override
@@ -507,6 +604,18 @@ public:
     sp::P<MarchingSquaresNode> msn;
     sp::P<sp::Node> cursor;
     sp::P<PlayerPawn> player;
+    double zoom = 15.0;
+};
+
+class SetupRenderPass : public sp::RenderPass
+{
+public:
+    void render(sp::RenderQueue& queue) override
+    {
+        auto shader = sp::Shader::get("marchingsquares.shader");
+        shader->bind();
+        shader->setUniform("tile_texture", sp::texture_manager.get("tiles.png"), 1);
+    }
 };
 
 int main(int argc, char** argv)
@@ -525,12 +634,12 @@ int main(int argc, char** argv)
     //window->setFullScreen(true);
 #endif
     window->setClearColor(sp::Color(1, 1, 1));
-    window->setClearColor(sp::Color(0, 0, 0));
 
     sp::gui::Theme::loadTheme("default", "gui/theme/basic.theme.txt");
     new sp::gui::Scene(sp::Vector2d(640, 480));
 
     sp::P<sp::SceneGraphicsLayer> scene_layer = new sp::SceneGraphicsLayer(1);
+    scene_layer->addRenderPass(new SetupRenderPass());
     scene_layer->addRenderPass(new sp::BasicNodeRenderPass());
 #ifdef DEBUG
     scene_layer->addRenderPass(new sp::CollisionRenderPass());

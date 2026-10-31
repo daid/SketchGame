@@ -35,18 +35,17 @@ float lineSide(vec2 p, vec2 a, vec2 b)
 
 void main()
 {
-    const float TEXTURE_SIZE = 9.0;
+    const float TEXTURE_SIZE = 128.0 + 1.0;
     const float OFF = 1.0/TEXTURE_SIZE;
     vec4 ca = texture2D(texture_map, v_uv + vec2(0.0, 0.0));
     vec4 cb = texture2D(texture_map, v_uv + vec2(OFF, 0.0));
-    vec4 cc = texture2D(texture_map, v_uv + vec2(0.0,-OFF));
-    vec4 cd = texture2D(texture_map, v_uv + vec2(OFF,-OFF));
+    vec4 cc = texture2D(texture_map, v_uv + vec2(0.0, OFF));
+    vec4 cd = texture2D(texture_map, v_uv + vec2(OFF, OFF));
     float a = ca.r - 0.5;
     float b = cb.r - 0.5;
     float c = cc.r - 0.5;
     float d = cd.r - 0.5;
     vec2 p = fract(v_uv * TEXTURE_SIZE);
-    p.y = 1.0 - p.y;
 
     int flags = 0;
     if (a >= 0.0) flags += 1;
@@ -120,5 +119,5 @@ void main()
     if (s > 0.25) tile_type2 = 0.5;
 
     vec2 texture_offset = vec2(0.5 * tile_type, tile_type2);
-    gl_FragColor.rgb = texture2D(tile_texture, texture_offset + fract(v_uv * 8.0) * 0.5).rgb;
+    gl_FragColor.rgb = texture2D(tile_texture, texture_offset + fract(v_uv * TEXTURE_SIZE / 8) * 0.5).rgb;
 }
