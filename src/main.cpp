@@ -22,6 +22,8 @@
 #include <sp2/stringutil/base64.h>
 
 #include "photoProcess.h"
+#include "worldgen.h"
+
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
@@ -63,10 +65,6 @@ public:
                 sp::Vector2f uv1{float(result.rect[1].x)/float(img.getSize().x),float(result.rect[1].y)/float(img.getSize().y)};
                 sp::Vector2f uv2{float(result.rect[2].x)/float(img.getSize().x),float(result.rect[2].y)/float(img.getSize().y)};
                 sp::Vector2f uv3{float(result.rect[3].x)/float(img.getSize().x),float(result.rect[3].y)/float(img.getSize().y)};
-                LOG(Debug, result.rect[0]);
-                LOG(Debug, result.rect[1]);
-                LOG(Debug, result.rect[2]);
-                LOG(Debug, result.rect[3]);
                 
                 vertices.emplace_back(sp::Vector3f(-mesh_size.x, -mesh_size.y, 0.0f), sp::Vector3f(0.0f,0.0f,1.0f), uv0);
                 vertices.emplace_back(sp::Vector3f( mesh_size.x, -mesh_size.y, 0.0f), sp::Vector3f(0.0f,0.0f,1.0f), uv1);
@@ -141,7 +139,8 @@ public:
     {
         sp::P<TestNode> other = info.other;
         if (other) {
-            auto nn = new TestNode(getParent(), (render_data.scale.x + other->render_data.scale.x) * 0.7);
+            auto new_size = std::sqrt(render_data.scale.x*render_data.scale.x+other->render_data.scale.x*other->render_data.scale.x);
+            auto nn = new TestNode(getParent(), new_size);
             nn->setPosition(info.position);
             info.other.destroy();
             delete this;
@@ -152,112 +151,6 @@ public:
     {
         setLinearVelocity(getLinearVelocity2D() - sp::Vector2d(0, 9.8) * double(sp::Engine::fixed_update_delta));
     }
-};
-
-class QuadTree
-{
-public:
-    uint32_t get(int x, int y) {
-        if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return DEFAULT_VALUE;
-
-        unsigned int depth = MAX_DEPTH - 1;
-        auto node = &data[0];
-        while(true) {
-            auto idx = 0;
-            if (x & (1 << depth)) { idx |= 1; }
-            if (y & (1 << depth)) { idx |= 2; }
-            auto value = (*node)[idx];
-            if (!(value & TAG_BRANCH)) return value;
-            depth -= 1;
-            node = &data[value&~TAG_BRANCH];
-        }
-    }
-
-    void set(int x, int y, uint32_t new_value)
-    {
-        sp2assert(!(new_value & TAG_BRANCH), "TAG_BRANCH set on value set in quadtree...");
-        if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return;
-        setImpl(0, x, y, MAX_DEPTH - 1, new_value);
-    }
-
-    std::shared_ptr<sp::MeshData> createDebugMesh()
-    {
-        sp::MeshBuilder mb;
-        std::function<void(float,float,float,unsigned)> f = [this, &mb, &f](float x, float y, float size, unsigned idx) {
-            auto& node = data[idx];
-            for(int n=0; n<4; n++) {
-                auto nx = x;
-                auto ny = y;
-                if (n & 1) nx += size;
-                if (n & 2) ny += size;
-                if (node[n] & TAG_BRANCH) {
-                    f(nx, ny, size / 2, node[n] & ~TAG_BRANCH);
-                } else {
-                    float f = float(node[n] & 0xFF) / 255.0;
-                    mb.addQuad(
-                        {nx+size*0.1f, ny+size*0.1f, 0.0f},
-                        {nx+size*0.9f, ny+size*0.1f, 0.0f},
-                        {nx+size*0.1f, ny+size*0.9f, 0.0f},
-                        {nx+size*0.9f, ny+size*0.9f, 0.0f},
-                        {0.0f, f, 1.0f-f}
-                    );
-                }
-            }
-        };
-        f(0, 0, SIZE / 2, 0);
-        return mb.create();
-    }
-
-    static constexpr unsigned int MAX_DEPTH = 12;
-    static constexpr int SIZE = 1 << MAX_DEPTH;
-private:
-    bool setImpl(uint32_t node_idx, int x, int y, int depth, uint32_t new_value)
-    {
-        int idx = 0;
-        if (x & (1 << depth)) idx |= 1;
-        if (y & (1 << depth)) idx |= 2;
-        if (depth == 0) {
-            data[node_idx][idx] = new_value;
-        } else {
-            auto value = data[node_idx][idx];
-            if (value & TAG_BRANCH) {
-                if (setImpl(value&~TAG_BRANCH, x, y, depth-1, new_value)) {
-                    freeNode(value&~TAG_BRANCH);
-                    data[node_idx][idx] = new_value;
-                }
-            } else if (value != new_value) {
-                auto new_node_idx = allocNode(value);
-                data[node_idx][idx] = new_node_idx | TAG_BRANCH;
-                setImpl(new_node_idx, x, y, depth - 1, new_value);
-            }
-        }
-        return data[node_idx][0] == data[node_idx][1] && data[node_idx][0] == data[node_idx][2] && data[node_idx][0] == data[node_idx][3];
-    }
-
-    uint32_t allocNode(uint32_t value)
-    {
-        if (freeList != TAG_BRANCH) {
-            auto res = freeList;
-            freeList = data[res][0];
-            data[res] = {value,value,value,value}; 
-            return res;
-        }
-        auto res = data.size();
-        data.push_back({value,value,value,value});
-        return res;
-    }
-
-    void freeNode(uint32_t index)
-    {
-        data[index][0] = freeList;
-        freeList = index;
-    }
-
-    static constexpr uint32_t TAG_BRANCH = 0x80000000;
-    static constexpr uint32_t DEFAULT_VALUE = 0x00000000;
-    using Node = std::array<uint32_t, 4>;
-    std::vector<Node> data {{DEFAULT_VALUE,DEFAULT_VALUE,DEFAULT_VALUE,DEFAULT_VALUE}};
-    uint32_t freeList = TAG_BRANCH;
 };
 
 class MarchingSquaresTexture : public sp::OpenGLTexture
@@ -273,45 +166,20 @@ class MarchingSquaresNode : public sp::Node
 public:
     MarchingSquaresNode(sp::P<sp::Node> parent) : sp::Node(parent)
     {
-        FastNoiseLite noise;
-        noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2S);
-        noise.SetFrequency(0.1);
+        generateWorld(tree);
 
-        for(int y=0;y<tree.SIZE;y++) {
-            for(int x=0;x<tree.SIZE;x++) {
-                int value = noise.GetNoise(float(x), float(y)) * 1000;
-                value -= (y - std::sin(x*0.01) * 100 - tree.SIZE*3/4) * 100;
-                value = std::clamp(value, 0, 255);
-                tree.set(x, y, value);
-            }
-        }
-
-        noise.SetSeed(13370);
-        for(int y=0;y<tree.SIZE;y++) {
-            for(int x=0;x<tree.SIZE;x++) {
-                auto value = tree.get(x, y);
-                if (uint8_t(value) > 128 && noise.GetNoise(float(x), float(y)) > 0) {
-                    tree.set(x, y, value | 0x100);
-                }
-            }
-            LOG(Debug, y);
-        }
-
-        updateMesh();
+        updateMesh({{0, 0}, {QuadTree::SIZE-1, QuadTree::SIZE-1}});
     }
 
     void updateMesh(sp::Rect2i area)
     {
         auto begin = area.position / CHUNK_SIZE;
         auto end = (area.position + area.size) / CHUNK_SIZE;
+        begin.x = std::clamp(begin.x, 0, CHUNK_SIDE_COUNT-1);
+        begin.y = std::clamp(begin.y, 0, CHUNK_SIDE_COUNT-1);
+        end.x = std::clamp(end.x, 0, CHUNK_SIDE_COUNT-1);
+        end.y = std::clamp(end.y, 0, CHUNK_SIDE_COUNT-1);
         for(auto p : sp::Rect2i(begin, end-begin+sp::Vector2i{1, 1})) {
-            updateMesh(p);
-        }
-    }
-
-    void updateMesh()
-    {
-        for(auto p : sp::Rect2i({0,0}, {CHUNK_SIDE_COUNT,CHUNK_SIDE_COUNT})) {
             updateMesh(p);
         }
 
@@ -450,7 +318,7 @@ public:
                 auto old_value = tree.get(p.x, p.y);
                 auto value = (std::max(uint8_t(old_value) + adjust, 0) & 0xFF) | (old_value & 0xFF00);
                 if (uint8_t(value) <= 128 && uint8_t(old_value) > 128) {
-                    auto test = new TestNode(getParent(), 1.0);
+                    auto test = new TestNode(getParent(), 0.3);
                     test->setPosition(sp::Vector2d(p));
                 }
                 tree.set(p.x, p.y, value);
