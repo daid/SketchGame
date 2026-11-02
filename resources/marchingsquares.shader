@@ -30,22 +30,23 @@ float m(float a, float b) {
 float lineSide(vec2 p, vec2 a, vec2 b)
 {
     float d = (b.x-a.x)*(p.y-a.y)-(b.y-a.y)*(p.x-a.x);
-    return d*-1000;
+    return d*-1000.0;
 }
 
 void main()
 {
     const float TEXTURE_SIZE = 128.0 + 1.0;
     const float OFF = 1.0/TEXTURE_SIZE;
-    vec4 ca = texture2D(texture_map, v_uv + vec2(0.0, 0.0));
-    vec4 cb = texture2D(texture_map, v_uv + vec2(OFF, 0.0));
-    vec4 cc = texture2D(texture_map, v_uv + vec2(0.0, OFF));
-    vec4 cd = texture2D(texture_map, v_uv + vec2(OFF, OFF));
+    vec2 tp = floor(v_uv * TEXTURE_SIZE);
+    vec2 p = (v_uv * TEXTURE_SIZE) - tp;
+    vec4 ca = texture2D(texture_map, tp * OFF + vec2(0.0, 0.0));
+    vec4 cb = texture2D(texture_map, tp * OFF + vec2(OFF, 0.0));
+    vec4 cc = texture2D(texture_map, tp * OFF + vec2(0.0, OFF));
+    vec4 cd = texture2D(texture_map, tp * OFF + vec2(OFF, OFF));
     float a = ca.r - 0.5;
     float b = cb.r - 0.5;
     float c = cc.r - 0.5;
     float d = cd.r - 0.5;
-    vec2 p = fract(v_uv * TEXTURE_SIZE);
 
     int flags = 0;
     if (a >= 0.0) flags += 1;
@@ -111,7 +112,7 @@ void main()
     float q = ca.g * (1.0-p.x) + cb.g * p.x;
     float r = cc.g * (1.0-p.x) + cd.g * p.x;
     float s = q * (1.0-p.y) + r * p.y;
-    float tile_type = round(s * 255.0);
+    float tile_type = floor(s * 255.0 + 0.5);
     q = a * (1.0-p.x) + b * p.x;
     r = c * (1.0-p.x) + d * p.x;
     s = q * (1.0-p.y) + r * p.y;
@@ -119,5 +120,5 @@ void main()
     if (s > 0.25) tile_type2 = 0.5;
 
     vec2 texture_offset = vec2(0.5 * tile_type, tile_type2);
-    gl_FragColor.rgb = texture2D(tile_texture, texture_offset + fract(v_uv * TEXTURE_SIZE / 8) * 0.5).rgb;
+    gl_FragColor.rgb = texture2D(tile_texture, texture_offset + fract(v_uv * TEXTURE_SIZE / 8.0) * 0.5).rgb;
 }
