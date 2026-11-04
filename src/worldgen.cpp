@@ -20,9 +20,6 @@ FastNoiseLite noise;
 static float sampleAt(int x, int y)
 {
     return mapgen_env->call<float>("sample", sp::Vector2f(x, y)).value();
-    float value = noise.GetNoise(float(x), float(y)) * 5.0f;
-    value -= (y - std::sin(x*0.01f) * 50.0f - QuadTree::SIZE*3/4.0f) * 0.1f;
-    return value;
 }
 
 static void genStep(QuadTree& tree, int x, int y, int depth)
@@ -46,8 +43,9 @@ static void genStep(QuadTree& tree, int x, int y, int depth)
 class NoiseObject : public sp::script::BindingObject
 {
 public:
-    NoiseObject()
+    NoiseObject(int seed_offset)
     {
+        noise.SetSeed(1337 + seed_offset * 17);
         noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2S);
     }
 
@@ -81,7 +79,7 @@ sp::string generateWorld(QuadTree& tree, sp::string code)
     while(!noise_list.empty()) for(auto n : noise_list) n.destroy();
     mapgen_env = new sp::script::Environment();
     mapgen_env->setGlobal("Noise", [](lua_State* lua) -> int {
-        auto no = new NoiseObject();
+        auto no = new NoiseObject(noise_list.size());
         noise_list.add(no);
         luaL_checktype(lua, 1, LUA_TTABLE);
         lua_pushnil(lua);
@@ -109,25 +107,5 @@ sp::string generateWorld(QuadTree& tree, sp::string code)
     }
     genStep(tree, 0, 0, QuadTree::MAX_DEPTH);
 
-    // for(int y=0;y<tree.SIZE;y++) {
-    //     for(int x=0;x<tree.SIZE;x++) {
-    //         int value = noise.GetNoise(float(x), float(y)) * 1000;
-    //         value -= (y - std::sin(x*0.01) * 50 - tree.SIZE*3/4) * 100;
-    //         value = std::clamp(value, 0, 255);
-    //         tree.setAtDepth(x, y, value, 0);
-    //     }
-    //     LOG(Debug, y);
-    // }
-
-    // noise.SetSeed(13370);
-    // for(int y=0;y<tree.SIZE;y++) {
-    //     for(int x=0;x<tree.SIZE;x++) {
-    //         auto value = tree.get(x, y);
-    //         if (uint8_t(value) > 128 && noise.GetNoise(float(x), float(y)) > 0) {
-    //             tree.set(x, y, value | 0x100);
-    //         }
-    //     }
-    //     LOG(Debug, y);
-    // }
     return "";
 }

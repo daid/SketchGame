@@ -18,5 +18,11 @@
     }
     [image] {
     }
+    [textarea] {
+        color: #000000
+    }
+    [slider] {
+        color: #000000
+    }
 }
 

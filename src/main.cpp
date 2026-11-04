@@ -5,6 +5,7 @@
 #include <sp2/graphics/gui/scene.h>
 #include <sp2/graphics/gui/theme.h>
 #include <sp2/graphics/gui/loader.h>
+#include <sp2/graphics/gui/widget/textarea.h>
 #include <sp2/graphics/scene/graphicslayer.h>
 #include <sp2/graphics/scene/basicnoderenderpass.h>
 #include <sp2/graphics/scene/collisionrenderpass.h>
@@ -51,6 +52,7 @@ function sample(p)
     return value;
 end
 )EOT";
+bool worldgen_code_changed = true;
 
 class PhotoDrawingTexture : public sp::OpenGLTexture
 {
@@ -181,6 +183,18 @@ public:
             LOG(Warning, res);
 
         updateMesh({{0, 0}, {QuadTree::SIZE-1, QuadTree::SIZE-1}});
+    }
+
+    void onUpdate(float) override
+    {
+        if (worldgen_code_changed) {
+            worldgen_code_changed = false;
+            auto res = generateWorld(tree, worldgen_code);
+            if (!res.empty())
+                LOG(Warning, res);
+            else
+                updateMesh({{0, 0}, {QuadTree::SIZE-1, QuadTree::SIZE-1}});
+        }
     }
 
     void updateMesh(sp::Rect2i area)
@@ -541,6 +555,13 @@ int main(int argc, char** argv)
     //     ct->upload();
     //     gui->getWidgetWithID("CAPTURE")->hide();
     // });
+
+    auto gui = sp::gui::Loader::load("gui/debug.gui", "EDIT");
+    gui->getWidgetWithID("CODE")->setAttribute("text", worldgen_code);
+    sp::P<sp::gui::TextArea>(gui->getWidgetWithID("CODE"))->setEditCallback([](sp::string code) {
+        worldgen_code = code;
+        worldgen_code_changed = true;
+    });
 
     engine->run();
 

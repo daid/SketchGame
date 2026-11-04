@@ -1,0 +1,12 @@
+[EDIT] {
+    stretch: true
+    {
+        alignment: topright
+        type: panel
+        [CODE] {
+            type: textarea
+            text_size: 10
+            size: 200, 480
+        }
+    }
+}
