@@ -19,7 +19,7 @@ FastNoiseLite noise;
 
 static float sampleAt(int x, int y)
 {
-    return mapgen_env->call("sample", sp::Vector2f(x, y)).value().getDouble();
+    return mapgen_env->call<float>("sample", sp::Vector2f(x, y)).value();
     float value = noise.GetNoise(float(x), float(y)) * 5.0f;
     value -= (y - std::sin(x*0.01f) * 50.0f - QuadTree::SIZE*3/4.0f) * 0.1f;
     return value;
@@ -73,13 +73,16 @@ protected:
 
     FastNoiseLite noise;
 };
+sp::PList<NoiseObject> noise_list;
 
-void generateWorld(QuadTree& tree)
+sp::string generateWorld(QuadTree& tree, sp::string code)
 {
     mapgen_env.destroy();
+    while(!noise_list.empty()) for(auto n : noise_list) n.destroy();
     mapgen_env = new sp::script::Environment();
     mapgen_env->setGlobal("Noise", [](lua_State* lua) -> int {
         auto no = new NoiseObject();
+        noise_list.add(no);
         luaL_checktype(lua, 1, LUA_TTABLE);
         lua_pushnil(lua);
         while(lua_next(lua, 1)) {
@@ -96,23 +99,13 @@ void generateWorld(QuadTree& tree)
     mapgen_env->setGlobal("sin", static_cast<float(*)(float)>(std::sin));
     mapgen_env->setGlobal("cos", static_cast<float(*)(float)>(std::cos));
     mapgen_env->setGlobal("random", sp::random);
-    auto res = mapgen_env->run(R"EOT(
-        ground_noise = Noise({frequency=0.1});
-
-        function sample(p)
-            local value = ground_noise.get(p) * 5.0;
-            value = value - (p.y - sin(p.x*0.02) * 50.0 - 128) * 0.1;
-            return value;
-        end
-    )EOT");
+    auto res = mapgen_env->run(code);
     if (res.isErr()) {
-        LOG(Warning, res.error());
-        return;
+        return res.error();
     }
-    auto res2 = mapgen_env->call("sample", sp::Vector2f(0, 0));
+    auto res2 = mapgen_env->call<float>("sample", sp::Vector2f(0, 0));
     if (res2.isErr()) {
-        LOG(Warning, res2.error());
-        return;
+        return res2.error();
     }
     genStep(tree, 0, 0, QuadTree::MAX_DEPTH);
 
@@ -136,4 +129,5 @@ void generateWorld(QuadTree& tree)
     //     }
     //     LOG(Debug, y);
     // }
+    return "";
 }

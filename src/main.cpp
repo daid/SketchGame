@@ -42,6 +42,16 @@ sp::io::Keybinding key_zoom{"ZOOM", {"=", "--"}};
 
 sp::P<sp::Window> window;
 
+sp::string worldgen_code = R"EOT(
+ground_noise = Noise({frequency=0.1});
+
+function sample(p)
+    local value = ground_noise.get(p) * 5.0;
+    value = value - (p.y - sin(p.x*0.02) * 50.0 - 128) * 0.1;
+    return value;
+end
+)EOT";
+
 class PhotoDrawingTexture : public sp::OpenGLTexture
 {
 public:
@@ -166,7 +176,9 @@ class MarchingSquaresNode : public sp::Node
 public:
     MarchingSquaresNode(sp::P<sp::Node> parent) : sp::Node(parent)
     {
-        generateWorld(tree);
+        auto res = generateWorld(tree, worldgen_code);
+        if (!res.empty())
+            LOG(Warning, res);
 
         updateMesh({{0, 0}, {QuadTree::SIZE-1, QuadTree::SIZE-1}});
     }
