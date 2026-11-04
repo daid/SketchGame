@@ -1,5 +1,6 @@
 #include "worldgen.h"
 #include <sp2/logging.h>
+#include <sp2/random.h>
 #include <sp2/script/environment.h>
 #include <sp2/stringutil/convert.h>
 #include <algorithm>
@@ -93,15 +94,26 @@ void generateWorld(QuadTree& tree)
         return 1;
     });
     mapgen_env->setGlobal("sin", static_cast<float(*)(float)>(std::sin));
-    mapgen_env->run(R"EOT(
+    mapgen_env->setGlobal("cos", static_cast<float(*)(float)>(std::cos));
+    mapgen_env->setGlobal("random", sp::random);
+    auto res = mapgen_env->run(R"EOT(
         ground_noise = Noise({frequency=0.1});
 
         function sample(p)
             local value = ground_noise.get(p) * 5.0;
-            -- value -= (y - sin(x*0.01) * 50.0 - 200) * 0.1;
+            value = value - (p.y - sin(p.x*0.02) * 50.0 - 128) * 0.1;
             return value;
         end
-)EOT");
+    )EOT");
+    if (res.isErr()) {
+        LOG(Warning, res.error());
+        return;
+    }
+    auto res2 = mapgen_env->call("sample", sp::Vector2f(0, 0));
+    if (res2.isErr()) {
+        LOG(Warning, res2.error());
+        return;
+    }
     genStep(tree, 0, 0, QuadTree::MAX_DEPTH);
 
     // for(int y=0;y<tree.SIZE;y++) {

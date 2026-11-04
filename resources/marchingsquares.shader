@@ -39,10 +39,10 @@ void main()
     const float OFF = 1.0/TEXTURE_SIZE;
     vec2 tp = floor(v_uv * TEXTURE_SIZE);
     vec2 p = (v_uv * TEXTURE_SIZE) - tp;
-    vec4 ca = texture2D(texture_map, tp * OFF + vec2(0.0, 0.0));
-    vec4 cb = texture2D(texture_map, tp * OFF + vec2(OFF, 0.0));
-    vec4 cc = texture2D(texture_map, tp * OFF + vec2(0.0, OFF));
-    vec4 cd = texture2D(texture_map, tp * OFF + vec2(OFF, OFF));
+    vec4 ca = texture2D(texture_map, tp * OFF + OFF*0.5 + vec2(0.0, 0.0));
+    vec4 cb = texture2D(texture_map, tp * OFF + OFF*0.5 + vec2(OFF, 0.0));
+    vec4 cc = texture2D(texture_map, tp * OFF + OFF*0.5 + vec2(0.0, OFF));
+    vec4 cd = texture2D(texture_map, tp * OFF + OFF*0.5 + vec2(OFF, OFF));
     float a = ca.r - 0.5;
     float b = cb.r - 0.5;
     float c = cc.r - 0.5;
